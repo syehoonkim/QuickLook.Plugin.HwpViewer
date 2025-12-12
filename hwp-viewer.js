@@ -8092,66 +8092,38 @@ export function renderHwp(container, base64) {
 
 function fitToViewer() {
     const viewer = document.getElementById("viewer");
-    const scaleRoot = document.getElementById("scale-root");
-    if (!viewer || !scaleRoot) return false;
+    const root = document.getElementById("scale-root");
+    if (!viewer || !root || !root.firstElementChild) return false;
 
-    // ⚠️ transform 제거한 "원본 크기" 기준
-    const prevTransform = scaleRoot.style.transform;
-    scaleRoot.style.transform = "none";
-
-    const rect = scaleRoot.getBoundingClientRect();
+    const firstPage = root.firstElementChild;
+    const rect = firstPage.getBoundingClientRect();
     const vw = viewer.clientWidth;
-    const vh = viewer.clientHeight;
 
-    if (!rect.width || !rect.height) {
-        scaleRoot.style.transform = prevTransform;
-        return false;
-    }
+    if (!rect.width) return false;
 
-    const scale = Math.min(
-        (vw - 16) / rect.width,
-        (vh - 16) / rect.height
-    );
+    const scale = (vw - 16) / rect.width;
 
-    // transform 복원
-    scaleRoot.style.transform = `scale(${scale})`;
+    // 🔑 핵심: transform ❌, zoom ✅
+    root.style.zoom = scale;
+
     return true;
 }
 
 
-async function fitWhenReady() {
-    if (document.fonts?.ready) {
-        try { await document.fonts.ready; } catch { }
-    }
-
-    for (let i = 0; i < 30; i++) {
-        if (fitToViewer()) {
-            requestAnimationFrame(() => fitToViewer());
-            return;
-        }
-        await new Promise(r => requestAnimationFrame(r));
-    }
-}
-
-
-const ro = new ResizeObserver(() => {
+window.addEventListener("resize", () => {
     fitToViewer();
 });
-
-ro.observe(document.getElementById("viewer"));
-
 
 window.loadHwpFromBase64 = function (base64) {
     const viewer = document.getElementById("viewer");
 
     viewer.innerHTML = `
-    <div id="align-box">
-      <div id="scale-root"></div>
-    </div>
-  `;
+      <div id="scale-wrapper">
+        <div id="scale-root"></div>
+      </div>
+    `;
 
     renderHwp(document.getElementById("scale-root"), base64);
-
     fitWhenReady();
 };
 
