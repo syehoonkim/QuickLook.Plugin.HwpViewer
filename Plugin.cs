@@ -159,7 +159,7 @@ namespace QuickLook.Plugin.Hwp
                 Assembly.GetExecutingAssembly().Location
             )!;
 
-            string localWeb = Path.Combine(dllDir, "web");
+            string localWeb = Path.Combine(dllDir);
             if (Directory.Exists(localWeb))
                 return localWeb;
 
