@@ -1,3 +1,13 @@
+/*!
+ * This file includes bundled code from hwp.js
+ *
+ * hwp.js
+ * Copyright © Han Lee and contributors
+ * Licensed under the Apache License, Version 2.0
+ * https://github.com/hahnlee/hwp.js
+ *
+ * The rest of this file is licensed under the MIT License.
+ */
 var commonjsGlobal = typeof globalThis !== "undefined" ? globalThis : typeof window !== "undefined" ? window : typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : {};
 function getDefaultExportFromCjs(x) {
   return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, "default") ? x["default"] : x;
