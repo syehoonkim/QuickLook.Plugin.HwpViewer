@@ -29,18 +29,20 @@ Windows용 **QuickLook**에서 한글 **HWP 파일을 미리보기** 할 수 있
 
 ---
 
-이 프로젝트는 **Apache License 2.0**으로 배포됩니다.
+## 라이선스
 
-이 소프트웨어는 다음 오픈소스 프로젝트를 포함합니다.
+본 프로젝트는 **MIT License**에 따라 배포됩니다.
+
+또한 본 프로젝트는 다음의 제3자 오픈소스 소프트웨어를 사용합니다.
 
 - **hwp.js**  
-  Copyright © Han Lee and other contributors  
-  Licensed under the Apache License, Version 2.0
+  Copyright © Han Lee 및 기여자  
+  **Apache License, Version 2.0**에 따라 라이선스됨  
+  https://github.com/hahnlee/hwp.js
 
-원본 프로젝트:  
-<https://github.com/hahnlee/hwp.js>
-
-본 플러그인에서는 QuickLook 환경에 맞게 일부 수정이 이루어졌습니다.
+Apache License 2.0은 본 프로젝트에 포함되거나 번들된 hwp.js 구성 요소에만
+적용됩니다.  
+자세한 내용은 [NOTICE](./NOTICE) 파일을 참고해 주십시오.
 
 ---
 
@@ -81,18 +83,20 @@ This plugin is built on top of **hwp.js**, rendering HWP documents in a WebView2
 
 ## 📜 License
 
-This project is licensed under the **Apache License, Version 2.0**.
+## License
 
-This software includes components from the following open-source project:
+This project is licensed under the **MIT License**.
+
+This project makes use of the following third-party software:
 
 - **hwp.js**  
-  Copyright © Han Lee and other contributors  
-  Licensed under the Apache License, Version 2.0
+  Copyright © Han Lee and contributors  
+  Licensed under the **Apache License, Version 2.0**  
+  https://github.com/hahnlee/hwp.js
 
-Original project:  
-<https://github.com/hahnlee/hwp.js>
-
-Modifications were made to adapt the project for the QuickLook plugin environment.
+Apache License 2.0 applies only to the hwp.js components included or
+bundled in this project.  
+See the [NOTICE](./NOTICE) file for more details.
 
 ---
 
