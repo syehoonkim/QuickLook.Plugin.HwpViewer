@@ -21,15 +21,19 @@
             overflow: hidden;
         }
 
-        .page {
-            background: white;
-            box-shadow: 0 0 20px rgba(0,0,0,0.4);
-            transform-origin: top center;
+        #align-box {
+            /* 정렬만 담당 */
+            display: block;
+        }
+
+        #scale-root {
+            /* transform 전용 */
+            will-change: transform;
         }
     </style>
 </head>
 <body>
     <div id="viewer"></div>
-    <script type="module" src="/main.js"></script>
+    <script type="module" src="/hwp-viewer.js"></script>
 </body>
 </html>

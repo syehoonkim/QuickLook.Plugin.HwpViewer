@@ -34,7 +34,7 @@ namespace QuickLook.Plugin.Hwp
 
         public void Prepare(string path, ContextObject context)
         {
-            context.PreferredSize = new Size { Width = 600, Height = 400 };
+            context.PreferredSize = new Size { Width = 525, Height = 743 };
         }
 
         public (double width, double height) ReadSvgSize(string svgPath)
@@ -72,8 +72,6 @@ namespace QuickLook.Plugin.Hwp
             return (w, h);
         }
 
-
-
         public void View(string path, ContextObject context)
         {
             // QuickLook 호스트의 UI Dispatcher를 잡습니다.
@@ -85,8 +83,6 @@ namespace QuickLook.Plugin.Hwp
                 {
                     var viewer = new WebView2();
 
-                    viewer.Width = 794;
-                    viewer.Height = 1123;
 
                     // ViewerContent/Title도 같은 Dispatcher에서 설정
                     context.ViewerContent = viewer;
