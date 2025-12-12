@@ -1,0 +1,69 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <OutputType>Library</OutputType>
+        <TargetFramework>net462</TargetFramework>
+        <RootNamespace>QuickLook.Plugin.Hwp</RootNamespace>
+        <AssemblyName>QuickLook.Plugin.Hwp</AssemblyName>
+	    <Platforms>AnyCPU;x64</Platforms>
+	    <UseWPF>true</UseWPF>
+	    <UseWindowsForms>true</UseWindowsForms>
+        <LangVersion>latest</LangVersion>
+	    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+	    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+	    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+	    <DebugType>full</DebugType>
+	    <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+        <Optimize>false</Optimize>
+        <OutputPath>bin\Debug\</OutputPath>
+        <DefineConstants>DEBUG;TRACE</DefineConstants>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+        <Optimize>true</Optimize>
+        <OutputPath>bin\Release\</OutputPath>
+        <DefineConstants>TRACE</DefineConstants>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <Compile Remove="QuickLook.Common\**" />
+      <EmbeddedResource Remove="QuickLook.Common\**" />
+      <None Remove="QuickLook.Common\**" />
+      <Page Remove="QuickLook.Common\**" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Include="QuickLook.Plugin.Metadata.Base.config" />
+        <None Include="QuickLook.Plugin.Metadata.config">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3650.58" />
+      <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+      <PackageReference Include="System.ValueTuple" Version="4.6.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="QuickLook.Common\QuickLook.Common.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <None Update="hwp-viewer.js">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+      <None Update="hwpers_for_quicklook.dll">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+      <None Update="index.html">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+      <None Update="main.js">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+    </ItemGroup>
+</Project>
