@@ -8,9 +8,7 @@ using System.Windows;
 [assembly: AssemblyTitle("QuickLook.Plugin.HwpViewer")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("pooi.moe")]
 [assembly: AssemblyProduct("QuickLook.Plugin.HwpViewer")]
-[assembly: AssemblyCopyright("Copyright © Kim Syehoon")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
