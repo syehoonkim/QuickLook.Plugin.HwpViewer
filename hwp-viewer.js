@@ -8100,25 +8100,45 @@ export function renderHwp(container, base64) {
     });
 }
 
+let baseScale = 1;
+let userScale = 1;
 function fitToViewer() {
     const viewer = document.getElementById("viewer");
     const root = document.getElementById("scale-root");
-    if (!viewer || !root || !root.firstElementChild) return false;
+    if (!viewer || !root || !root.firstElementChild) return;
 
     const firstPage = root.firstElementChild;
     const rect = firstPage.getBoundingClientRect();
     const vw = viewer.clientWidth;
 
-    if (!rect.width) return false;
+    if (!rect.width) return;
 
-    const scale = (vw - 16) / rect.width;
+    baseScale = (vw - 16) / rect.width;
+    applyZoom();
+}
+function applyZoom() {
+    const root = document.getElementById("scale-root");
+    if (!root) return;
 
-    // 🔑 핵심: transform ❌, zoom ✅
-    root.style.zoom = scale;
-
-    return true;
+    const finalScale = baseScale * userScale;
+    root.style.zoom = finalScale;
 }
 
+const viewer = document.getElementById("viewer");
+
+viewer.addEventListener("wheel", (e) => {
+    if (!e.ctrlKey) return;
+
+    e.preventDefault();
+
+    const delta = e.deltaY < 0 ? 1.1 : 0.9;
+    userScale *= delta;
+
+    // 제한 (선택)
+    userScale = Math.min(Math.max(userScale, 0.25), 4);
+
+    applyZoom();
+}, { passive: false });
 
 window.addEventListener("resize", () => {
     fitToViewer();
