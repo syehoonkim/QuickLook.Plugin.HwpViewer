@@ -17,6 +17,7 @@ using System.Threading;
 using System.Windows.Threading;
 using Newtonsoft.Json;
 using System.Reflection;
+using System.Collections.Generic;
 
 namespace QuickLook.Plugin.Hwp
 {
@@ -91,6 +92,32 @@ namespace QuickLook.Plugin.Hwp
                     var env = await CoreWebView2Environment.CreateAsync();
                     await viewer.EnsureCoreWebView2Async(env);
 
+                       const string pluginSubPath = @"QuickLook.Plugin\QuickLook.Plugin.HwpViewer";
+
+            var result = new List<string>();
+
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+            string[] basePaths =
+            {
+                Path.Combine(appData, @"pooi.moe\QuickLook"),
+                Path.Combine(appData, @"pooi.moe\QuickLook\UserData"),
+                Path.Combine(localAppData, @"pooi.moe\QuickLook"),
+                Path.Combine(
+                    localAppData,
+                    @"Packages\21090PaddyXu.QuickLook_egxr34yet59cg\LocalCache\Roaming\pooi.moe\QuickLook"
+                )
+            };
+
+            foreach (var basePath in basePaths)
+            {
+                if (!Directory.Exists(basePath))
+                    continue;
+
+                result.Add(Path.Combine(basePath, pluginSubPath));
+            }
+
                     string webRoot = ResolveWebRoot();
                     viewer.CoreWebView2.SetVirtualHostNameToFolderMapping("app", webRoot, CoreWebView2HostResourceAccessKind.Allow);
                     viewer.CoreWebView2.Navigate("https://app/index.html");
@@ -129,38 +156,32 @@ namespace QuickLook.Plugin.Hwp
 
         static string ResolveWebRoot()
         {
-            // 1️⃣ LocalAppData
-            string localAppData = Environment.GetFolderPath(
-                Environment.SpecialFolder.LocalApplicationData
-            );
+            const string pluginSubPath = @"QuickLook.Plugin\QuickLook.Plugin.HwpViewer";
 
-            // 2️⃣ MS Store QuickLook 패키지 경로
-            string storeWeb = Path.Combine(
-                localAppData,
-                "Packages",
-                "21090PaddyXu.QuickLook_egxr34yet59cg",
-                "LocalCache",
-                "Roaming",
-                "pooi.moe",
-                "QuickLook",
-                "QuickLook.Plugin",
-                "QuickLook.Plugin.HwpViewer"
-            );
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
-            if (Directory.Exists(storeWeb))
-                return storeWeb;
+            string[] basePaths =
+            {
+                Path.Combine(appData, @"pooi.moe\QuickLook"),
+                Path.Combine(appData, @"pooi.moe\QuickLook\UserData"),
+                Path.Combine(localAppData, @"pooi.moe\QuickLook"),
+                Path.Combine(
+                    localAppData,
+                    @"Packages\21090PaddyXu.QuickLook_egxr34yet59cg\LocalCache\Roaming\pooi.moe\QuickLook"
+                )
+            };
 
-            // 3️⃣ Portable / GitHub 버전 fallback
-            string dllDir = Path.GetDirectoryName(
-                Assembly.GetExecutingAssembly().Location
-            )!;
-
-            string localWeb = Path.Combine(dllDir);
-            if (Directory.Exists(localWeb))
-                return localWeb;
+            foreach (var basePath in basePaths)
+            {
+                if (Directory.Exists(basePath))
+                {
+                    return Path.Combine(basePath, pluginSubPath);
+                }
+            }
 
             throw new DirectoryNotFoundException(
-                "QuickLook.Plugin.HwpViewer web resources not found"
+                "QuickLook base directory was not found in any known AppData locations."
             );
         }
 
