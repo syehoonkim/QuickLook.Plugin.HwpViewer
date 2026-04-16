@@ -1,32 +1,67 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="ko">
 <head>
-    <meta charset="utf-8" />
-    <base href="/" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuickLook HWP Viewer</title>
     <style>
-        html, body {
+        body, html {
             margin: 0;
+            padding: 0;
             width: 100%;
             height: 100%;
             overflow: hidden;
+            background-color: #f3f3f3;
         }
 
-        #viewer {
+        #viewer-container {
             width: 100%;
             height: 100%;
-            overflow-y: auto;
-            overflow-x: auto;
-            background: #2b2b2b;
-            text-align: center;
-        }
-
-        #scale-root {
-            display: inline-block;
+            overflow: auto;
         }
     </style>
 </head>
 <body>
-    <div id="viewer"></div>
-    <script type="module" src="/hwp-viewer.js"></script>
+    <div id="viewer-container"></div>
+
+    <script type="module">
+        import init, { HwpDocument } from './rhwp.js';
+
+        globalThis.measureTextWidth = (font, text) => {
+            const ctx = document.createElement('canvas').getContext('2d');
+            ctx.font = font;
+            return ctx.measureText(text).width;
+        };
+
+        await init({ module_or_path: '/rhwp_bg.wasm' });
+
+        window.loadHwpFromWebView2 = function (base64Data) {
+            try {
+                const binaryString = atob(base64Data);
+                const len = binaryString.length;
+                const bytes = new Uint8Array(len);
+
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                const container = document.getElementById('viewer-container');
+                container.innerHTML = "";
+
+                const doc = new HwpDocument(bytes);
+                const pageCount = doc.pageCount();
+                for (let i = 0; i < pageCount; i++) {
+                    const pageSvg = doc.renderPageSvg(i);
+                    const pageDiv = document.createElement('div');
+                    pageDiv.innerHTML = pageSvg;
+                    container.appendChild(pageDiv);
+                }
+            } catch (error) {
+                console.error("문서 렌더링 중 오류 발생:", error);
+                document.getElementById('viewer-container').innerHTML =
+                    `<p style="color:red; padding:20px;">문서 로드 실패: ${error.message}</p>`;
+            }
+        };
+    </script>
 </body>
 </html>
