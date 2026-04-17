@@ -2,6 +2,7 @@
 using System.IO;
 using System.Windows;
 using QuickLook.Common.Plugin;
+using QuickLook.Common.Helpers;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 using System.Xml.Linq;
@@ -26,10 +27,15 @@ namespace QuickLook.Plugin.Hwp
 
         public void Prepare(string path, ContextObject context)
         {
-            int baseWidth = 210;
-            int baseHeight = 297;
-            int r = 4;
-            context.PreferredSize = new Size { Width = baseWidth * r, Height = baseHeight * r };
+            Size currentDesktopSize = WindowHelper.GetCurrentDesktopSize();
+
+            double r = 0.7;
+            double aspectRatio = 297.0 / 210.0;
+            int Height= (int)(currentDesktopSize.Height * r);
+            int Width= (int)(Height / aspectRatio);
+
+            context.CanResize = true;
+            context.PreferredSize = new Size { Width = Width, Height = Height };
         }
 
         public void View(string path, ContextObject context)
@@ -42,8 +48,12 @@ namespace QuickLook.Plugin.Hwp
                 {
                     var viewer = new WebView2();
 
+                    viewer.Width = context.PreferredSize.Width;
+                    viewer.Height = context.PreferredSize.Height;
+
                     context.ViewerContent = viewer;
                     context.Title = Path.GetFileName(path);
+
 
                     var env = await CoreWebView2Environment.CreateAsync();
                     await viewer.EnsureCoreWebView2Async(env);
@@ -84,6 +94,9 @@ namespace QuickLook.Plugin.Hwp
                         {
                             byte[] data = File.ReadAllBytes(path);
                             string base64 = Convert.ToBase64String(data);
+
+                            string setWindowSizeScript = $"window.resizeTo({context.PreferredSize.Width}, {context.PreferredSize.Height});";
+                            await viewer.ExecuteScriptAsync(setWindowSizeScript);
 
                             // base64는 따옴표 문제 줄이기 위해 JSON 문자열로 안전하게 전달 권장
                             string js = $"window.loadHwpFromWebView2({JsonConvert.SerializeObject(base64)});";

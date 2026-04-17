@@ -8,22 +8,21 @@
         body, html {
             margin: 0;
             padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
             background-color: #f3f3f3;
         }
-
-        #viewer-container {
-            width: 100%;
-            height: 100%;
-            overflow: auto;
-        }
     </style>
+    <script>
+        let width = 0;
+        let height = 0;
+        window.resizeTo = function (widthInPt, heightInPt) {
+            document.documentElement.style.width = widthInPt;
+            document.documentElement.style.height = heightInPt;
+            width = widthInPt;
+            height = heightInPt;
+        }
+    </script>
 </head>
 <body>
-    <div id="viewer-container"></div>
-
     <script type="module">
         import init, { HwpDocument } from './rhwp.js';
 
@@ -45,17 +44,23 @@
                     bytes[i] = binaryString.charCodeAt(i);
                 }
 
-                const container = document.getElementById('viewer-container');
-                container.innerHTML = "";
-
                 const doc = new HwpDocument(bytes);
+
                 const pageCount = doc.pageCount();
+
+                const parser = new DOMParser();
                 for (let i = 0; i < pageCount; i++) {
-                    const pageSvg = doc.renderPageSvg(i);
-                    const pageDiv = document.createElement('div');
-                    pageDiv.innerHTML = pageSvg;
-                    container.appendChild(pageDiv);
+                    const canvas = document.createElement('canvas');
+                    const pageInfo = JSON.parse(doc.getPageInfo(i));
+                    const pageWidth = pageInfo.width;
+                    const pageHeight = pageInfo.height;
+                    const svg = parser.parseFromString(doc.renderPageSvg(i), "image/svg+xml").documentElement;
+                    svg.setAttribute("viewBox", `0 0 ${pageWidth} ${pageHeight}`)
+                    svg.setAttribute("width", width);
+                    svg.setAttribute("height", height);
+                    document.body.appendChild(svg);
                 }
+
             } catch (error) {
                 console.error("문서 렌더링 중 오류 발생:", error);
                 document.getElementById('viewer-container').innerHTML =
