@@ -54,10 +54,11 @@
                     const pageInfo = JSON.parse(doc.getPageInfo(i));
                     const pageWidth = pageInfo.width;
                     const pageHeight = pageInfo.height;
+                    const r = 0.95;
                     const svg = parser.parseFromString(doc.renderPageSvg(i), "image/svg+xml").documentElement;
                     svg.setAttribute("viewBox", `0 0 ${pageWidth} ${pageHeight}`)
-                    svg.setAttribute("width", width);
-                    svg.setAttribute("height", height);
+                    svg.setAttribute("width", width * r);
+                    svg.setAttribute("height", height * r);
                     document.body.appendChild(svg);
                 }
 

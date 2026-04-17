@@ -25,16 +25,17 @@ namespace QuickLook.Plugin.Hwp
             return !Directory.Exists(path) && path.ToLower().EndsWith(".hwp");
         }
 
+
         public void Prepare(string path, ContextObject context)
         {
             Size currentDesktopSize = WindowHelper.GetCurrentDesktopSize();
 
             double r = 0.7;
             double aspectRatio = 297.0 / 210.0;
-            int Height= (int)(currentDesktopSize.Height * r);
-            int Width= (int)(Height / aspectRatio);
+            int Height = (int)(currentDesktopSize.Height * r);
+            int Width = (int)(Height / aspectRatio);
 
-            context.CanResize = true;
+            context.CanResize = false;
             context.PreferredSize = new Size { Width = Width, Height = Height };
         }
 
@@ -46,14 +47,13 @@ namespace QuickLook.Plugin.Hwp
             {
                 try
                 {
-                    var viewer = new WebView2();
+                    WebView2 viewer = new WebView2();
 
                     viewer.Width = context.PreferredSize.Width;
                     viewer.Height = context.PreferredSize.Height;
 
                     context.ViewerContent = viewer;
                     context.Title = Path.GetFileName(path);
-
 
                     var env = await CoreWebView2Environment.CreateAsync();
                     await viewer.EnsureCoreWebView2Async(env);
@@ -119,6 +119,8 @@ namespace QuickLook.Plugin.Hwp
                 }
             });
         }
+
+
         public void Cleanup()
         {
         }
