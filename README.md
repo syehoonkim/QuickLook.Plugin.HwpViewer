@@ -2,7 +2,7 @@
 
 # QuickLook HWP Viewer Plugin
 
-Windows용 **QuickLook**에서 한글 **HWP 파일을 미리보기** 할 수 있게 해주는 플러그인입니다.  
+Windows용 [**QuickLook**](https://github.com/QL-Win/QuickLook)에서 한글 **HWP 파일을 미리보기** 할 수 있게 해주는 플러그인입니다.  
 파일 탐색기에서 HWP 파일을 선택한 뒤 **Space 키**를 누르면 문서 내용을 즉시 확인할 수 있습니다.
 
 이 플러그인은 `v0.0.6`까지는 오픈소스 프로젝트 [**hwp.js**](https://github.com/hahnlee/hwp.js)를 기반으로 하였으나, 현재는 [**rhwp**](https://github.com/edwardkim/rhwp)를 이용하도록 변경되었습니다.
