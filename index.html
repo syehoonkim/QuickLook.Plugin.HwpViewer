@@ -1,161 +1,255 @@
 <!DOCTYPE html>
 <html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QuickLook HWP Viewer</title>
-    <style>
-        html, body {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            min-height: 100%;
-            box-sizing: border-box;
-            overflow-x: hidden;
-            background: #f0f0f0;
-        }
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>QuickLook HWP Viewer</title>
+        <style>
+            html, body {
+                margin: 0;
+                padding: 0;
+                width: 100%;
+                min-height: 100%;
+                box-sizing: border-box;
+                overflow-x: hidden;
+                background: #f0f0f0;
+            }
 
-        body {
-            padding-top: 12px;
-            padding-bottom: 12px;
-        }
+            body {
+                padding-top: 12px;
+                padding-bottom: 12px;
+            }
 
-        *, *::before, *::after {
-            box-sizing: inherit;
-        }
+            *, *::before, *::after {
+                box-sizing: inherit;
+            }
 
-        .page {
-            display: block;
-            margin: 0 auto 12px auto;
-            width: 100%;
-            overflow: hidden;
-        }
-
-            .page svg {
+            .page {
                 display: block;
-                max-width: 100%;
-                height: auto;
-            }
-    </style>
-    <script>
-        let width = 0;
-        let height = 0;
-        window.resizeTo = function (widthInPt, heightInPt) {
-            document.documentElement.style.width = widthInPt;
-            document.documentElement.style.height = heightInPt;
-            width = widthInPt;
-            height = heightInPt;
-        }
-    </script>
-</head>
-<body>
-    <script type="module">
-        import init, { HwpDocument } from './rhwp.js';
-
-        let hostWidth = window.innerWidth;
-        let hostHeight = window.innerHeight;
-        let renderedPages = [];
-
-        let fitScheduled = false;
-
-        function scheduleFitPages() {
-            if (fitScheduled) {
-                return;
+                margin: 0 auto 12px auto;
+                width: 100%;
+                overflow: hidden;
             }
 
-            fitScheduled = true;
+                .page svg {
+                    display: block;
+                    max-width: 100%;
+                    height: auto;
+                }
+        </style>
+    </head>
+    <body>
+        <script type="module">
+            import init, { HwpDocument } from './rhwp.js';
 
-            requestAnimationFrame(() => {
-                fitScheduled = false;
-                fitPagesToWidth();
+            let renderedPages = [];
+
+            let doc = null;
+
+            let fitScheduled = false;
+
+            const observer = new IntersectionObserver(entries => {
+                for (const entry of entries) {
+                    if (!entry.isIntersecting) {
+                        continue;
+                    }
+
+                    const index = Number(entry.target.dataset.pageIndex);
+
+                    waitIdle().then(() => {
+                        renderPage(index);
+                    });
+
+                    observer.unobserve(entry.target);
+                }
+            }, {
+                root: null,
+                rootMargin: "1200px 0px",
+                threshold: 0.01
             })
-        }
 
-        function getAvailableWidth() {
-            const viewportWidth = document.documentElement.clientWidth;
+            const parser = new DOMParser();
 
-            const horizontalMargin = 10;
+            function renderPage(index) {
+                try {
+                    const page = renderedPages[index];
 
-            return Math.max(1, viewportWidth - horizontalMargin);
-        }
+                    if (!page || page.rendered || page.rendering) {
+                        return;
+                    }
 
-        function fitPagesToWidth() {
-            const availableWidth = getAvailableWidth();
+                    page.rendering = true;
 
+                    const svgText = doc.renderPageSvg(index);
+                    const svg = parser.parseFromString(svgText, "image/svg+xml").documentElement;
 
-            for (const page of renderedPages) {
+                    svg.setAttribute("viewBox", `0 0 ${page.pageWidth} ${page.pageHeight}`);
+                    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+                    svg.style.display = "block";
+                    svg.style.background = "white";
+
+                    page.wrapper.replaceChildren(svg);
+                    page.svg = svg;
+                    page.rendered = true;
+
+                    fitOnePage(page);
+                } catch (error) {
+                    const errorMsg = `page ${index + 1} render failed`
+                    console.error(errorMsg, error);
+                    page.wrapper.textContent = errorMsg
+                }
+                finally {
+                    page.rendering = false;
+                }
+            }
+
+            function fitOnePage(page) {
+                const margin = 24;
+                const availableWidth = Math.max(1, document.documentElement.clientWidth - margin);
                 const scale = availableWidth / page.pageWidth;
 
                 const fittedWidth = Math.floor(page.pageWidth * scale);
                 const fittedHeight = Math.floor(page.pageHeight * scale);
 
-                page.svg.setAttribute("width", fittedWidth);
-                page.svg.setAttribute("height", fittedHeight);
+                page.wrapper.style.width = fittedWidth + "px";
+                page.wrapper.style.minHeight = fittedHeight + "px";
+
+                if (page.svg) {
+                    page.svg.setAttribute("width", fittedWidth);
+                    page.svg.setAttribute("height", fittedHeight);
+                }
             }
-        }
 
-        window.chrome?.webview?.addEventListener('message', (e) => {
-            if (e.data?.type === "host-resize") {
-                scheduleFitPages();
+            function fitPagesToWidth() {
+                for (const page of renderedPages) {
+                    fitOnePage(page);
+                }
             }
-        });
 
-        window.addEventListener('resize', scheduleFitPages);
+            const measureCanvas = document.createElement("canvas");
+            const measureCtx = measureCanvas.getContext("2d");
 
-        globalThis.measureTextWidth = (font, text) => {
-            const ctx = document.createElement('canvas').getContext('2d');
-            ctx.font = font;
-            return ctx.measureText(text).width;
-        };
+            const textWidthCache = new Map();
+            const MAX_TEXT_WIDTH_CACHE = 30000;
 
-        await init({ module_or_path: '/rhwp_bg.wasm' });
+            globalThis.measureTextWidth = (font, text) => {
+                const key = font + "\n" + text;
 
-        window.loadHwpFromWebView2 = function (base64Data) {
-            try {
+                const cached = textWidthCache.get(key);
+
+                if (cached !== undefined) {
+                    return cached;
+                }
+
+                measureCtx.font = font;
+                const width = measureCtx.measureText(text).width;
+
+                if (textWidthCache.size < MAX_TEXT_WIDTH_CACHE) {
+                    textWidthCache.set(key, width);
+                }
+
+                return width;
+            };
+
+            function waitIdle() {
+                return new Promise(resolve => {
+                    if ("requestIdleCallback" in window) {
+                        requestIdleCallback(() => resolve(), { timeout: 50 })
+                    } else {
+                        setTimeout(resolve, 0);
+                    }
+                })
+            }
+
+            function scheduleFitPages() {
+                if (fitScheduled) {
+                    return;
+                }
+
+                fitScheduled = true;
+
+                requestAnimationFrame(() => {
+                    fitScheduled = false;
+                    fitPagesToWidth();
+                })
+            }
+
+            function getAvailableWidth() {
+                const viewportWidth = document.documentElement.clientWidth;
+
+                const horizontalMargin = 10;
+
+                return Math.max(1, viewportWidth - horizontalMargin);
+            }
+
+            window.chrome?.webview?.addEventListener('message', (e) => {
+                if (e.data?.type === "host-resize") {
+                    scheduleFitPages();
+                }
+            });
+
+            window.addEventListener('resize', scheduleFitPages);
+
+            await init({ module_or_path: '/rhwp_bg.wasm' });
+
+            window.loadHwpFromUrl = async function (url) {
+                const response = await fetch(url, { cache: "no-store" });
+
+                if (!response.ok) {
+                    throw new Error(`HWP fetch failed: ${response.status} ${response.statusText}`)
+                }
+
+                const buffer = await response.arrayBuffer();
+                const bytes = new Uint8Array(buffer);
+
+                await loadHwpBytes(bytes);
+            }
+
+            window.hwpViewerReady = true;
+
+            window.chrome?.webview?.postMessage({
+                type: "viewer-ready"
+            });
+
+            async function loadHwpBytes(bytes) {
                 document.body.innerHTML = "";
                 renderedPages = [];
 
-                const binaryString = atob(base64Data);
-                const len = binaryString.length;
-                const bytes = new Uint8Array(len);
-
-                for (let i = 0; i < len; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-
-                const doc = new HwpDocument(bytes);
+                doc = new HwpDocument(bytes);
 
                 const pageCount = doc.pageCount();
 
-                const parser = new DOMParser();
-
                 for (let i = 0; i < pageCount; i++) {
                     const pageInfo = JSON.parse(doc.getPageInfo(i));
-                    const pageWidth = pageInfo.width;
-                    const pageHeight = pageInfo.height;
 
-                    const svg = parser.parseFromString(doc.renderPageSvg(i), "image/svg+xml").documentElement;
-                    svg.setAttribute("viewBox", `0 0 ${pageWidth} ${pageHeight}`)
-                    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-                    svg.style.display = "block";
-                    svg.style.backgroundColor = "white";
+                    const page = {
+                        index: i,
+                        pageWidth: pageInfo.width,
+                        pageHeight: pageInfo.height,
+                        wrapper: document.createElement("div"),
+                        svg: null,
+                        rendered: false,
+                        rendering: false
+                    }
 
-                    const wrapper = document.createElement("div")
-                    wrapper.className = "page"
-                    wrapper.appendChild(svg)
+                    page.wrapper.className = "page";
+                    page.wrapper.textContent = `Loading page ${i + 1}...`;
+                    page.wrapper.dataset.pageIndex = String(i);
 
-                    document.body.appendChild(wrapper);
+                    document.body.appendChild(page.wrapper);
+                    renderedPages.push(page);
 
-                    renderedPages.push({ wrapper, svg, width: pageWidth, height: pageHeight });
+                    if (i !== 0) {
+                        observer.observe(page.wrapper);
+                    }
                 }
 
-                scheduleFitPages();
-            } catch (error) {
-                console.error("문서 렌더링 중 오류 발생:", error);
-                document.getElementById('viewer-container').innerHTML =
-                    `<p style="color:red; padding:20px;">문서 로드 실패: ${error.message}</p>`;
-            }
-        };
-    </script>
-</body>
+                fitPagesToWidth();
+
+                if (pageCount > 0) {
+                    renderPage(0);
+                }
+            };
+        </script>
+    </body>
 </html>

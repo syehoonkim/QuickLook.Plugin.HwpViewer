@@ -10,12 +10,15 @@ using System.Globalization;
 using System.Windows.Threading;
 using Newtonsoft.Json;
 using System.Collections.Generic;
+using System.Security.Cryptography.X509Certificates;
 
 namespace QuickLook.Plugin.Hwp
 {
     public class Plugin : IViewer
     {
         public int Priority => 0;
+
+        private WebView2 _viewer;
 
         public void Init()
         {
@@ -48,6 +51,8 @@ namespace QuickLook.Plugin.Hwp
                 try
                 {
                     WebView2 viewer = new WebView2();
+
+                    _viewer = viewer;
 
                     viewer.HorizontalAlignment = HorizontalAlignment.Stretch;
                     viewer.VerticalAlignment = VerticalAlignment.Stretch;
@@ -105,40 +110,97 @@ namespace QuickLook.Plugin.Hwp
                     }
 
                     string webRoot = ResolveWebRoot();
-                    viewer.CoreWebView2.SetVirtualHostNameToFolderMapping("app", webRoot, CoreWebView2HostResourceAccessKind.Allow);
-                    viewer.CoreWebView2.Navigate("https://app/index.html");
 
-                    viewer.CoreWebView2.NavigationCompleted += async (_, __) =>
+                    const string appHost = "app";
+                    const string hwpHost = "hwp-resource.local";
+                    string hwpRequestId = Guid.NewGuid().ToString("N");
+                    string hwpUrl = $"https://hwp-resource.local/__current_hwp__?id={hwpRequestId}";
+
+                    bool loadRequested = false;
+
+                    viewer.CoreWebView2.WebMessageReceived += async (s, e) =>
                     {
                         try
                         {
-                            byte[] data = File.ReadAllBytes(path);
-                            string base64 = Convert.ToBase64String(data);
+                            dynamic message = JsonConvert.DeserializeObject(e.WebMessageAsJson);
 
-                            string setWindowSizeScript = $"window.resizeTo({context.PreferredSize.Width}, {context.PreferredSize.Height});";
-                            await viewer.ExecuteScriptAsync(setWindowSizeScript);
+                            if (message?.type != "viewer-ready")
+                            {
+                                return;
+                            }
 
-                            string js = $"window.loadHwpFromWebView2({JsonConvert.SerializeObject(base64)});";
+                            if (loadRequested)
+                            {
+                                return;
+                            }
+
+                            loadRequested = true;
+
+                            string js = $"window.loadHwpFromUrl({JsonConvert.SerializeObject(hwpUrl)});";
                             await viewer.ExecuteScriptAsync(js);
 
-                            var payload = JsonConvert.SerializeObject(new
+                            viewer.CoreWebView2.PostWebMessageAsJson(
+                            JsonConvert.SerializeObject(new
                             {
-                                type = "host_resize",
-                                width = viewer.ActualWidth,
-                                height = viewer.ActualHeight
-                            });
+                                type = "host-resize"
+                            })
+                            );
 
-                            viewer.CoreWebView2.PostWebMessageAsJson(payload);
-
-                            // Busy 플래그도 UI Dispatcher에서
-                            dispatcher.InvokeAsync(() => context.IsBusy = false);
+                            context.IsBusy = false;
                         }
                         catch
                         {
-                            dispatcher.InvokeAsync(() => context.IsBusy = false);
+                            context.IsBusy = false;
                             throw;
                         }
                     };
+
+                    viewer.CoreWebView2.SetVirtualHostNameToFolderMapping(appHost, webRoot, CoreWebView2HostResourceAccessKind.Allow);
+                    viewer.CoreWebView2.AddWebResourceRequestedFilter("https://hwp-resource.local/*", CoreWebView2WebResourceContext.All);
+                    viewer.CoreWebView2.WebResourceRequested += (s, e) =>
+                    {
+                        var uri = new Uri(e.Request.Uri);
+                        if (!uri.Host.Equals(hwpHost, StringComparison.OrdinalIgnoreCase) ||
+                            !uri.AbsolutePath.Equals("/__current_hwp__", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return;
+                        }
+
+                        const string responseHeaders =
+                            "Access-Control-Allow-Origin: https://app\r\n" +
+                            "Access-Control-Allow-Methods: GET, OPTIONS\r\n" +
+                            "Access-Control-Allow-Headers: *\r\n" +
+                            "Cache-Control: no-store, no-cache, must-revalidate\r\n" +
+                            "Pragma: no-cache\r\n" +
+                            "Expires: 0\r\n";
+
+                        if (e.Request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
+                        {
+                            e.Response = viewer.CoreWebView2.Environment.CreateWebResourceResponse(Stream.Null, 204, "No Content", responseHeaders + "Content-Type: application/octet-stream\r\n");
+                            return;
+                        }
+
+                        if (!File.Exists(path))
+                        {
+                            e.Response = viewer.CoreWebView2.Environment.CreateWebResourceResponse(Stream.Null, 404, "Not Found", responseHeaders + "Conteht-Type: text/plain\r\n");
+                            return;
+                        }
+
+                        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+
+                        e.Response = viewer.CoreWebView2.Environment.CreateWebResourceResponse(stream, 200, "OK", responseHeaders + "Content-Type: application/octet-stream\r\n");
+                    };
+
+                    viewer.CoreWebView2.NavigationCompleted += async (_, e) =>
+                    {
+                        if (!e.IsSuccess)
+                        {
+                            context.IsBusy = false;
+                            return;
+                        }
+                    };
+
+                    viewer.CoreWebView2.Navigate("https://app/index.html");
                 }
                 catch
                 {
@@ -148,9 +210,26 @@ namespace QuickLook.Plugin.Hwp
             });
         }
 
-
         public void Cleanup()
         {
+            var viewer = _viewer;
+            _viewer = null;
+
+            if (viewer == null)
+            {
+                return;
+            }
+
+            var dispatcher = Application.Current?.Dispatcher ?? viewer.Dispatcher;
+
+            if (dispatcher.CheckAccess())
+            {
+                viewer.Dispose();
+            }
+            else
+            {
+                dispatcher.Invoke(() => viewer.Dispose());
+            }
         }
 
         static string ResolveWebRoot()
