@@ -35,7 +35,7 @@ namespace QuickLook.Plugin.Hwp
             int Height = (int)(currentDesktopSize.Height * r);
             int Width = (int)(Height / aspectRatio);
 
-            context.CanResize = false;
+            context.CanResize = true;
             context.PreferredSize = new Size { Width = Width, Height = Height };
         }
 
@@ -49,8 +49,28 @@ namespace QuickLook.Plugin.Hwp
                 {
                     WebView2 viewer = new WebView2();
 
-                    viewer.Width = context.PreferredSize.Width;
-                    viewer.Height = context.PreferredSize.Height;
+                    viewer.HorizontalAlignment = HorizontalAlignment.Stretch;
+                    viewer.VerticalAlignment = VerticalAlignment.Stretch;
+
+                    viewer.SizeChanged += (s, e) =>
+                    {
+                        if (viewer.CoreWebView2 == null)
+                        {
+                            return;
+                        }
+
+                        if (e.NewSize.Width <= 0 || e.NewSize.Height <= 0)
+                        {
+                            return;
+                        }
+
+                        var payload = JsonConvert.SerializeObject(new
+                        {
+                            type = "host-resize",
+                        });
+
+                        viewer.CoreWebView2.PostWebMessageAsJson(payload);
+                    };
 
                     context.ViewerContent = viewer;
                     context.Title = Path.GetFileName(path);
@@ -98,9 +118,17 @@ namespace QuickLook.Plugin.Hwp
                             string setWindowSizeScript = $"window.resizeTo({context.PreferredSize.Width}, {context.PreferredSize.Height});";
                             await viewer.ExecuteScriptAsync(setWindowSizeScript);
 
-                            // base64는 따옴표 문제 줄이기 위해 JSON 문자열로 안전하게 전달 권장
                             string js = $"window.loadHwpFromWebView2({JsonConvert.SerializeObject(base64)});";
                             await viewer.ExecuteScriptAsync(js);
+
+                            var payload = JsonConvert.SerializeObject(new
+                            {
+                                type = "host_resize",
+                                width = viewer.ActualWidth,
+                                height = viewer.ActualHeight
+                            });
+
+                            viewer.CoreWebView2.PostWebMessageAsJson(payload);
 
                             // Busy 플래그도 UI Dispatcher에서
                             dispatcher.InvokeAsync(() => context.IsBusy = false);

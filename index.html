@@ -5,11 +5,37 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QuickLook HWP Viewer</title>
     <style>
-        body, html {
+        html, body {
             margin: 0;
             padding: 0;
-            background-color: #f3f3f3;
+            width: 100%;
+            min-height: 100%;
+            box-sizing: border-box;
+            overflow-x: hidden;
+            background: #f0f0f0;
         }
+
+        body {
+            padding-top: 12px;
+            padding-bottom: 12px;
+        }
+
+        *, *::before, *::after {
+            box-sizing: inherit;
+        }
+
+        .page {
+            display: block;
+            margin: 0 auto 12px auto;
+            width: 100%;
+            overflow: hidden;
+        }
+
+            .page svg {
+                display: block;
+                max-width: 100%;
+                height: auto;
+            }
     </style>
     <script>
         let width = 0;
@@ -26,6 +52,56 @@
     <script type="module">
         import init, { HwpDocument } from './rhwp.js';
 
+        let hostWidth = window.innerWidth;
+        let hostHeight = window.innerHeight;
+        let renderedPages = [];
+
+        let fitScheduled = false;
+
+        function scheduleFitPages() {
+            if (fitScheduled) {
+                return;
+            }
+
+            fitScheduled = true;
+
+            requestAnimationFrame(() => {
+                fitScheduled = false;
+                fitPagesToWidth();
+            })
+        }
+
+        function getAvailableWidth() {
+            const viewportWidth = document.documentElement.clientWidth;
+
+            const horizontalMargin = 10;
+
+            return Math.max(1, viewportWidth - horizontalMargin);
+        }
+
+        function fitPagesToWidth() {
+            const availableWidth = getAvailableWidth();
+
+
+            for (const page of renderedPages) {
+                const scale = availableWidth / page.pageWidth;
+
+                const fittedWidth = Math.floor(page.pageWidth * scale);
+                const fittedHeight = Math.floor(page.pageHeight * scale);
+
+                page.svg.setAttribute("width", fittedWidth);
+                page.svg.setAttribute("height", fittedHeight);
+            }
+        }
+
+        window.chrome?.webview?.addEventListener('message', (e) => {
+            if (e.data?.type === "host-resize") {
+                scheduleFitPages();
+            }
+        });
+
+        window.addEventListener('resize', scheduleFitPages);
+
         globalThis.measureTextWidth = (font, text) => {
             const ctx = document.createElement('canvas').getContext('2d');
             ctx.font = font;
@@ -36,6 +112,9 @@
 
         window.loadHwpFromWebView2 = function (base64Data) {
             try {
+                document.body.innerHTML = "";
+                renderedPages = [];
+
                 const binaryString = atob(base64Data);
                 const len = binaryString.length;
                 const bytes = new Uint8Array(len);
@@ -49,19 +128,28 @@
                 const pageCount = doc.pageCount();
 
                 const parser = new DOMParser();
+
                 for (let i = 0; i < pageCount; i++) {
-                    const canvas = document.createElement('canvas');
                     const pageInfo = JSON.parse(doc.getPageInfo(i));
                     const pageWidth = pageInfo.width;
                     const pageHeight = pageInfo.height;
-                    const r = 0.95;
+
                     const svg = parser.parseFromString(doc.renderPageSvg(i), "image/svg+xml").documentElement;
                     svg.setAttribute("viewBox", `0 0 ${pageWidth} ${pageHeight}`)
-                    svg.setAttribute("width", width * r);
-                    svg.setAttribute("height", height * r);
-                    document.body.appendChild(svg);
+                    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+                    svg.style.display = "block";
+                    svg.style.backgroundColor = "white";
+
+                    const wrapper = document.createElement("div")
+                    wrapper.className = "page"
+                    wrapper.appendChild(svg)
+
+                    document.body.appendChild(wrapper);
+
+                    renderedPages.push({ wrapper, svg, width: pageWidth, height: pageHeight });
                 }
 
+                scheduleFitPages();
             } catch (error) {
                 console.error("문서 렌더링 중 오류 발생:", error);
                 document.getElementById('viewer-container').innerHTML =
