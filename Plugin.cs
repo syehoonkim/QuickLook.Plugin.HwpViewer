@@ -1,12 +1,14 @@
-﻿using System;
-using System.IO;
-using System.Windows;
-using QuickLook.Common.Plugin;
-using QuickLook.Common.Helpers;
-using Microsoft.Web.WebView2.Core;
+﻿using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
-using System.Windows.Threading;
 using Newtonsoft.Json;
+using QuickLook.Common.Helpers;
+using QuickLook.Common.Plugin;
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Threading;
 
 namespace QuickLook.Plugin.Hwp
 {
@@ -14,11 +16,35 @@ namespace QuickLook.Plugin.Hwp
     {
         public int Priority => 0;
 
-        private WebView2 _viewer;
+        private WebView2 viewer = new WebView2();
+
+        private static readonly Lazy<string> SharedWebRoot = new Lazy<string>(ResolveWebRoot);
+        private static readonly Lazy<Task<CoreWebView2Environment>> SharedEnvironmentTask =
+            new Lazy<Task<CoreWebView2Environment>>(() => CoreWebView2Environment.CreateAsync());
+
+        private sealed class HostMessage
+        {
+            public string type { get; set; }
+            public string message { get; set; }
+            public int? pageIndex { get; set; }
+        }
+
+
+        const string appHost = "app";
+        const string hwpHost = "hwp-resource.local";
+
+        const string responseHeaders =
+            "Access-Control-Allow-Origin: https://app\r\n" +
+            "Access-Control-Allow-Methods: GET, OPTIONS\r\n" +
+            "Access-Control-Allow-Headers: *\r\n" +
+            "Cache-Control: no-store, no-cache, must-revalidate\r\n" +
+            "Pragma: no-cache\r\n" +
+            "Expires: 0\r\n";
 
         public void Init()
         {
         }
+
         public bool CanHandle(string path)
         {
             return !Directory.Exists(path) && path.ToLower().EndsWith(".hwp");
@@ -46,12 +72,14 @@ namespace QuickLook.Plugin.Hwp
             {
                 try
                 {
-                    WebView2 viewer = new WebView2();
+                    viewer = new WebView2
+                    {
+                        HorizontalAlignment = HorizontalAlignment.Stretch,
+                        VerticalAlignment = VerticalAlignment.Stretch,
+                    };
 
-                    _viewer = viewer;
-
-                    viewer.HorizontalAlignment = HorizontalAlignment.Stretch;
-                    viewer.VerticalAlignment = VerticalAlignment.Stretch;
+                    context.ViewerContent = viewer;
+                    context.Title = Path.GetFileName(path);
 
                     viewer.SizeChanged += (s, e) =>
                     {
@@ -73,16 +101,10 @@ namespace QuickLook.Plugin.Hwp
                         viewer.CoreWebView2.PostWebMessageAsJson(payload);
                     };
 
-                    context.ViewerContent = viewer;
-                    context.Title = Path.GetFileName(path);
+                    var env = await SharedEnvironmentTask.Value;
 
-                    var env = await CoreWebView2Environment.CreateAsync();
                     await viewer.EnsureCoreWebView2Async(env);
 
-                    string webRoot = ResolveWebRoot();
-
-                    const string appHost = "app";
-                    const string hwpHost = "hwp-resource.local";
                     string hwpRequestId = Guid.NewGuid().ToString("N");
                     string hwpUrl = $"https://hwp-resource.local/__current_hwp__?id={hwpRequestId}";
 
@@ -90,49 +112,61 @@ namespace QuickLook.Plugin.Hwp
 
                     viewer.CoreWebView2.WebMessageReceived += async (s, e) =>
                     {
+                        HostMessage message;
+
                         try
                         {
-                            dynamic message = JsonConvert.DeserializeObject(e.WebMessageAsJson);
-
-                            if (message?.type != "viewer-ready")
-                            {
-                                return;
-                            }
-
-                            if (loadRequested)
-                            {
-                                return;
-                            }
-
-                            loadRequested = true;
-                            try
-                            {
-                                string js = $"window.loadHwpFromUrl({JsonConvert.SerializeObject(hwpUrl)});";
-                                await viewer.ExecuteScriptAsync(js);
-                            }
-                            catch
-                            {
-                                loadRequested = false;
-                                throw;
-                            }
-
-                            viewer.CoreWebView2.PostWebMessageAsJson(
-                            JsonConvert.SerializeObject(new
-                            {
-                                type = "host-resize"
-                            })
-                            );
-
-                            context.IsBusy = false;
+                            message = JsonConvert.DeserializeObject<HostMessage>(e.WebMessageAsJson);
                         }
-                        catch
+                        catch (Exception ex)
                         {
-                            context.IsBusy = false;
-                            throw;
+                            Debug.WriteLine($"[QuickLook.Hwp] Failed to parse host message: {ex}");
+                            return;
+                        }
+
+                        if (message?.type == null)
+                        {
+                            return;
+                        }
+
+                        switch (message.type)
+                        {
+                            case "viewer-ready":
+                                if (loadRequested)
+                                {
+                                    return;
+                                }
+
+                                loadRequested = true;
+                                try
+                                {
+                                    string js = $"window.loadHwpFromUrl({JsonConvert.SerializeObject(hwpUrl)});";
+                                    await viewer.ExecuteScriptAsync(js);
+                                }
+                                catch
+                                {
+                                    loadRequested = false;
+                                    context.IsBusy = false;
+                                    throw;
+                                }
+
+                                break;
+
+                            case "load-complete":
+                                context.IsBusy = false;
+                                break;
+
+                            case "load-failed":
+                            case "render-failed":
+                                Debug.WriteLine(
+                                 $"[QuickLook.Hwp] {message.type}: {message.message} (page={message.pageIndex?.ToString() ?? "n/a"})"
+                             );
+                                context.IsBusy = false;
+                                break;
                         }
                     };
 
-                    viewer.CoreWebView2.SetVirtualHostNameToFolderMapping(appHost, webRoot, CoreWebView2HostResourceAccessKind.Allow);
+                    viewer.CoreWebView2.SetVirtualHostNameToFolderMapping(appHost, SharedWebRoot.Value, CoreWebView2HostResourceAccessKind.Allow);
                     viewer.CoreWebView2.AddWebResourceRequestedFilter("https://hwp-resource.local/*", CoreWebView2WebResourceContext.All);
                     viewer.CoreWebView2.WebResourceRequested += (s, e) =>
                     {
@@ -142,14 +176,6 @@ namespace QuickLook.Plugin.Hwp
                         {
                             return;
                         }
-
-                        const string responseHeaders =
-                            "Access-Control-Allow-Origin: https://app\r\n" +
-                            "Access-Control-Allow-Methods: GET, OPTIONS\r\n" +
-                            "Access-Control-Allow-Headers: *\r\n" +
-                            "Cache-Control: no-store, no-cache, must-revalidate\r\n" +
-                            "Pragma: no-cache\r\n" +
-                            "Expires: 0\r\n";
 
                         if (e.Request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
                         {
@@ -189,13 +215,7 @@ namespace QuickLook.Plugin.Hwp
 
         public void Cleanup()
         {
-            var viewer = _viewer;
-            _viewer = null;
-
-            if (viewer == null)
-            {
-                return;
-            }
+            viewer = null;
 
             var dispatcher = Application.Current?.Dispatcher ?? viewer.Dispatcher;
 

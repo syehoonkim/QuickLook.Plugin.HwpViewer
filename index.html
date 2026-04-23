@@ -42,222 +42,255 @@
     </style>
 </head>
 <body>
+    <div id="viewer-root" />
     <script type="module">
-      import init, { HwpDocument } from "./rhwp.js";
+        import init, { HwpDocument } from "./rhwp.js";
 
-      let renderedPages = [];
+        const viewerRoot = document.getElementById("viewer-root");
 
-      let doc = null;
+        const measureCanvas = document.createElement("canvas");
+        const measureCtx = measureCanvas.getContext("2d");
 
-      let fitScheduled = false;
+        const textWidthCache = new Map();
+        const MAX_TEXT_WIDTH_CACHE = 30000;
 
-      const observer = new IntersectionObserver(
-        (entries) => {
-          for (const entry of entries) {
-            if (!entry.isIntersecting) {
-              continue;
+        let renderedPages = [];
+
+        let doc = null;
+
+        let fitScheduled = false;
+
+        let renderGeneration = 0;
+
+        const parser = new DOMParser();
+
+        const margin = 24;
+
+        function postHostMessage(type, extra = {}) {
+            window.chrome?.webview?.postMessage({ type, ...extra });
+        }
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    if (!entry.isIntersecting) {
+                        continue;
+                    }
+
+                    const index = Number(entry.target.dataset.pageIndex);
+
+                    waitIdle().then(() => {
+                        renderPage(index);
+                    });
+
+                    observer.unobserve(entry.target);
+                }
+            },
+            {
+                root: null,
+                rootMargin: "1200px 0px",
+                threshold: 0.01,
+            },
+        );
+
+        function renderPage(index) {
+            const page = renderedPages[index];
+
+            try {
+                if (!page || page.rendered || page.rendering) {
+                    return;
+                }
+
+                page.rendering = true;
+
+                const svgText = doc.renderPageSvg(index);
+                const svg = parser.parseFromString(
+                    svgText,
+                    "image/svg+xml",
+                ).documentElement;
+
+                svg.setAttribute(
+                    "viewBox",
+                    `0 0 ${page.pageWidth} ${page.pageHeight}`,
+                );
+                svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+                svg.style.display = "block";
+                svg.style.background = "white";
+
+                page.wrapper.replaceChildren(svg);
+                page.svg = svg;
+                page.rendered = true;
+
+                fitOnePage(page);
+            } catch (error) {
+                const errorMsg = `page ${index + 1} render failed`;
+                console.error(errorMsg, error);
+                page.wrapper.textContent = errorMsg;
+                postHostMessage("render-failed", {
+                    pageIndex: index,
+                    message: error?.message ?? String(error),
+                })
+            } finally {
+                page.rendering = false;
+            }
+        }
+
+        function fitOnePage(page) {
+            const availableWidth = Math.max(
+                1,
+                document.documentElement.clientWidth - margin,
+            );
+            const scale = availableWidth / page.pageWidth;
+
+            const fittedWidth = Math.floor(page.pageWidth * scale);
+            const fittedHeight = Math.floor(page.pageHeight * scale);
+
+            page.wrapper.style.width = fittedWidth + "px";
+            page.wrapper.style.minHeight = fittedHeight + "px";
+
+            if (page.svg) {
+                page.svg.setAttribute("width", fittedWidth);
+                page.svg.setAttribute("height", fittedHeight);
+            }
+        }
+
+        function fitPagesToWidth() {
+            for (const page of renderedPages) {
+                fitOnePage(page);
+            }
+        }
+
+        globalThis.measureTextWidth = (font, text) => {
+            const key = font + "\n" + text;
+
+            const cached = textWidthCache.get(key);
+
+            if (cached !== undefined) {
+                return cached;
             }
 
-            const index = Number(entry.target.dataset.pageIndex);
+            measureCtx.font = font;
+            const width = measureCtx.measureText(text).width;
 
-            waitIdle().then(() => {
-              renderPage(index);
+            if (textWidthCache.size < MAX_TEXT_WIDTH_CACHE) {
+                textWidthCache.set(key, width);
+            }
+
+            return width;
+        };
+
+        function waitIdle() {
+            return new Promise((resolve) => {
+                if ("requestIdleCallback" in window) {
+                    requestIdleCallback(() => resolve(), { timeout: 50 });
+                } else {
+                    setTimeout(resolve, 0);
+                }
             });
-
-            observer.unobserve(entry.target);
-          }
-        },
-        {
-          root: null,
-          rootMargin: "1200px 0px",
-          threshold: 0.01,
-        },
-      );
-
-      const parser = new DOMParser();
-
-      function renderPage(index) {
-        const page = renderedPages[index];
-
-        try {
-          if (!page || page.rendered || page.rendering) {
-            return;
-          }
-
-          page.rendering = true;
-
-          const svgText = doc.renderPageSvg(index);
-          const svg = parser.parseFromString(
-            svgText,
-            "image/svg+xml",
-          ).documentElement;
-
-          svg.setAttribute(
-            "viewBox",
-            `0 0 ${page.pageWidth} ${page.pageHeight}`,
-          );
-          svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-          svg.style.display = "block";
-          svg.style.background = "white";
-
-          page.wrapper.replaceChildren(svg);
-          page.svg = svg;
-          page.rendered = true;
-
-          fitOnePage(page);
-        } catch (error) {
-          const errorMsg = `page ${index + 1} render failed`;
-          console.error(errorMsg, error);
-          page.wrapper.textContent = errorMsg;
-        } finally {
-          page.rendering = false;
-        }
-      }
-
-      function fitOnePage(page) {
-        const margin = 24;
-        const availableWidth = Math.max(
-          1,
-          document.documentElement.clientWidth - margin,
-        );
-        const scale = availableWidth / page.pageWidth;
-
-        const fittedWidth = Math.floor(page.pageWidth * scale);
-        const fittedHeight = Math.floor(page.pageHeight * scale);
-
-        page.wrapper.style.width = fittedWidth + "px";
-        page.wrapper.style.minHeight = fittedHeight + "px";
-
-        if (page.svg) {
-          page.svg.setAttribute("width", fittedWidth);
-          page.svg.setAttribute("height", fittedHeight);
-        }
-      }
-
-      function fitPagesToWidth() {
-        for (const page of renderedPages) {
-          fitOnePage(page);
-        }
-      }
-
-      const measureCanvas = document.createElement("canvas");
-      const measureCtx = measureCanvas.getContext("2d");
-
-      const textWidthCache = new Map();
-      const MAX_TEXT_WIDTH_CACHE = 30000;
-
-      globalThis.measureTextWidth = (font, text) => {
-        const key = font + "\n" + text;
-
-        const cached = textWidthCache.get(key);
-
-        if (cached !== undefined) {
-          return cached;
         }
 
-        measureCtx.font = font;
-        const width = measureCtx.measureText(text).width;
+        function scheduleFitPages() {
+            if (fitScheduled) {
+                return;
+            }
 
-        if (textWidthCache.size < MAX_TEXT_WIDTH_CACHE) {
-          textWidthCache.set(key, width);
+            fitScheduled = true;
+
+            requestAnimationFrame(() => {
+                fitScheduled = false;
+                fitPagesToWidth();
+            });
         }
 
-        return width;
-      };
-
-      function waitIdle() {
-        return new Promise((resolve) => {
-          if ("requestIdleCallback" in window) {
-            requestIdleCallback(() => resolve(), { timeout: 50 });
-          } else {
-            setTimeout(resolve, 0);
-          }
+        window.chrome?.webview?.addEventListener("message", (e) => {
+            if (e.data?.type === "host-resize") {
+                scheduleFitPages();
+            }
         });
-      }
 
-      function scheduleFitPages() {
-        if (fitScheduled) {
-          return;
+        window.addEventListener("resize", scheduleFitPages);
+
+        await init({ module_or_path: "/rhwp_bg.wasm" });
+
+        window.loadHwpFromUrl = async function (url) {
+            try {
+                const response = await fetch(url, { cache: "no-store" });
+
+                if (!response.ok) {
+                    throw new Error(
+                        `HWP fetch failed: ${response.status} ${response.statusText}`,
+                    );
+                }
+
+                const buffer = await response.arrayBuffer();
+                const bytes = new Uint8Array(buffer);
+
+                await loadHwpBytes(bytes);
+
+                postHostMessage("load-complete");
+            } catch (e) {
+                console.error("loadHwpFromUrl failed", e);
+                postHostMessage("load-failed", {
+                    message: e?.message ?? String(e)
+                });
+                throw e;
+            }
+        };
+
+        postHostMessage("viewer-ready");
+
+        async function loadHwpBytes(bytes) {
+            renderGeneration += 1;
+            const generation = renderGeneration;
+
+            observer.disconnect();
+            viewerRoot.replaceChildren();
+            renderedPages = [];
+
+            doc = new HwpDocument(bytes);
+
+            const pageCount = doc.pageCount();
+
+            for (let i = 0; i < pageCount; i++) {
+                const pageInfo = JSON.parse(doc.getPageInfo(i));
+
+                const page = {
+                    index: i,
+                    pageWidth: pageInfo.width,
+                    pageHeight: pageInfo.height,
+                    wrapper: document.createElement("div"),
+                    svg: null,
+                    rendered: false,
+                    rendering: false,
+                };
+
+                page.wrapper.className = "page";
+                page.wrapper.textContent = `Loading page ${i + 1}...`;
+                page.wrapper.dataset.pageIndex = String(i);
+
+                document.body.appendChild(page.wrapper);
+                renderedPages.push(page);
+
+                if (i !== 0) {
+                    observer.observe(page.wrapper);
+                }
+            }
+
+            fitPagesToWidth();
+
+            if (pageCount > 0) {
+                renderPage(0);
+            }
+
+            if (pageCount > 1) {
+                waitIdle().then(() => {
+                    if (generation !== renderGeneration) {
+                        return;
+                    }
+                    renderPage(1, generation);
+                });
+            }
         }
-
-        fitScheduled = true;
-
-        requestAnimationFrame(() => {
-          fitScheduled = false;
-          fitPagesToWidth();
-        });
-      }
-
-      window.chrome?.webview?.addEventListener("message", (e) => {
-        if (e.data?.type === "host-resize") {
-          scheduleFitPages();
-        }
-      });
-
-      window.addEventListener("resize", scheduleFitPages);
-
-      await init({ module_or_path: "/rhwp_bg.wasm" });
-
-      window.loadHwpFromUrl = async function (url) {
-        const response = await fetch(url, { cache: "no-store" });
-
-        if (!response.ok) {
-          throw new Error(
-            `HWP fetch failed: ${response.status} ${response.statusText}`,
-          );
-        }
-
-        const buffer = await response.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-
-        await loadHwpBytes(bytes);
-      };
-
-      window.hwpViewerReady = true;
-
-      window.chrome?.webview?.postMessage({
-        type: "viewer-ready",
-      });
-
-      async function loadHwpBytes(bytes) {
-        document.body.innerHTML = "";
-        renderedPages = [];
-
-        doc = new HwpDocument(bytes);
-
-        const pageCount = doc.pageCount();
-
-        for (let i = 0; i < pageCount; i++) {
-          const pageInfo = JSON.parse(doc.getPageInfo(i));
-
-          const page = {
-            index: i,
-            pageWidth: pageInfo.width,
-            pageHeight: pageInfo.height,
-            wrapper: document.createElement("div"),
-            svg: null,
-            rendered: false,
-            rendering: false,
-          };
-
-          page.wrapper.className = "page";
-          page.wrapper.textContent = `Loading page ${i + 1}...`;
-          page.wrapper.dataset.pageIndex = String(i);
-
-          document.body.appendChild(page.wrapper);
-          renderedPages.push(page);
-
-          if (i !== 0) {
-            observer.observe(page.wrapper);
-          }
-        }
-
-        fitPagesToWidth();
-
-        if (pageCount > 0) {
-          renderPage(0);
-        }
-      }
     </script>
 </body>
 </html>
