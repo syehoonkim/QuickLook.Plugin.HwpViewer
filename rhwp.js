@@ -1151,10 +1151,61 @@ export class HwpDocument {
      * 문서를 HWP 바이너리로 내보낸다.
      *
      * Document IR을 HWP 5.0 CFB 바이너리로 직렬화하여 반환한다.
+     * HWPX 출처 문서는 `export_hwp_with_adapter` 를 통해 HWPX→HWP IR 매핑 어댑터를
+     * 자동 적용하여 한컴 호환성과 자기 재로드 페이지 보존을 보장한다 (#178).
+     * HWP 출처는 어댑터가 no-op 이므로 기존 동작과 동일.
      * @returns {Uint8Array}
      */
     exportHwp() {
         const ret = wasm.hwpdocument_exportHwp(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
+     * 어댑터 적용 + HWP 직렬화 + 자기 재로드 검증을 수행하고 결과를 JSON 으로 반환한다 (#178).
+     *
+     * 반환 JSON:
+     * ```json
+     * {
+     *   "bytesLen": 678912,
+     *   "pageCountBefore": 9,
+     *   "pageCountAfter": 9,
+     *   "recovered": true
+     * }
+     * ```
+     *
+     * 본 함수는 검증 메타데이터만 반환하며 bytes 자체는 별도 호출 (`exportHwp`) 로 받아야 한다.
+     * 검증과 실제 사용을 분리하여 호출자가 결과에 따라 다른 동작을 취할 수 있도록 한다.
+     * @returns {string}
+     */
+    exportHwpVerify() {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.hwpdocument_exportHwpVerify(this.__wbg_ptr);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * Document IR을 HWPX(ZIP+XML)로 직렬화하여 반환한다.
+     * @returns {Uint8Array}
+     */
+    exportHwpx() {
+        const ret = wasm.hwpdocument_exportHwpx(this.__wbg_ptr);
         if (ret[3]) {
             throw takeFromExternrefTable0(ret[2]);
         }
@@ -2822,6 +2873,22 @@ export class HwpDocument {
         return ret !== 0;
     }
     /**
+     * 원본 파일 형식을 반환한다 ("hwp" 또는 "hwpx").
+     * @returns {string}
+     */
+    getSourceFormat() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.hwpdocument_getSourceFormat(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * 특정 문단의 스타일을 조회한다.
      *
      * 반환값: JSON { id, name }
@@ -3137,6 +3204,48 @@ export class HwpDocument {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * HWPX 비표준 감지 경고를 JSON 문자열로 반환한다 (#177).
+     *
+     * ## 반환 형식
+     *
+     * ```json
+     * {
+     *   "count": 3,
+     *   "summary": {
+     *     "lineseg 배열이 비어있음": 1,
+     *     "lineseg 가 미계산 상태 (line_height=0)": 2
+     *   },
+     *   "warnings": [
+     *     {
+     *       "section": 0,
+     *       "paragraph": 5,
+     *       "kind": "LinesegArrayEmpty",
+     *       "cell": null
+     *     },
+     *     {
+     *       "section": 0,
+     *       "paragraph": 10,
+     *       "kind": "LinesegUncomputed",
+     *       "cell": {"ctrl": 0, "row": 0, "col": 1, "innerPara": 0}
+     *     }
+     *   ]
+     * }
+     * ```
+     * @returns {string}
+     */
+    getValidationWarnings() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.hwpdocument_getValidationWarnings(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
         }
     }
     /**
@@ -4251,6 +4360,19 @@ export class HwpDocument {
         } finally {
             wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
         }
+    }
+    /**
+     * 사용자 명시 요청에 의한 lineseg 전체 reflow (#177).
+     *
+     * `reflow_zero_height_paragraphs` 의 자동 경로와 달리, "빈 line_segs + text 존재"
+     * 케이스까지 포함해 재계산한다. 반환값은 실제로 reflow 된 문단 개수.
+     *
+     * 호출 이후 렌더 캐시·페이지네이션이 갱신되므로 즉시 렌더링하면 보정된 결과가 보인다.
+     * @returns {number}
+     */
+    reflowLinesegs() {
+        const ret = wasm.hwpdocument_reflowLinesegs(this.__wbg_ptr);
+        return ret >>> 0;
     }
     /**
      * 커서 위치의 누름틀 필드를 제거한다 (본문 문단).
@@ -5770,7 +5892,7 @@ function __wbg_get_imports() {
         __wbg_lineTo_c9f1e0dd4824ae31: function(arg0, arg1, arg2) {
             arg0.lineTo(arg1, arg2);
         },
-        __wbg_measureTextWidth_3f7ab3a9f314ad03: function(arg0, arg1, arg2, arg3) {
+        __wbg_measureTextWidth_0962d94b80b2a16a: function(arg0, arg1, arg2, arg3) {
             const ret = globalThis.measureTextWidth(getStringFromWasm0(arg0, arg1), getStringFromWasm0(arg2, arg3));
             return ret;
         },
