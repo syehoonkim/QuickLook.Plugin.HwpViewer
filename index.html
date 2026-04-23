@@ -1,255 +1,263 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>QuickLook HWP Viewer</title>
-        <style>
-            html, body {
-                margin: 0;
-                padding: 0;
-                width: 100%;
-                min-height: 100%;
-                box-sizing: border-box;
-                overflow-x: hidden;
-                background: #f0f0f0;
-            }
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QuickLook HWP Viewer</title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            min-height: 100%;
+            box-sizing: border-box;
+            overflow-x: hidden;
+            background: #f0f0f0;
+        }
 
-            body {
-                padding-top: 12px;
-                padding-bottom: 12px;
-            }
+        body {
+            padding-top: 12px;
+            padding-bottom: 12px;
+        }
 
-            *, *::before, *::after {
-                box-sizing: inherit;
-            }
+        *,
+        *::before,
+        *::after {
+            box-sizing: inherit;
+        }
 
-            .page {
+        .page {
+            display: block;
+            margin: 0 auto 12px auto;
+            width: 100%;
+            overflow: hidden;
+        }
+
+            .page svg {
                 display: block;
-                margin: 0 auto 12px auto;
-                width: 100%;
-                overflow: hidden;
+                max-width: 100%;
+                height: auto;
+            }
+    </style>
+</head>
+<body>
+    <script type="module">
+      import init, { HwpDocument } from "./rhwp.js";
+
+      let renderedPages = [];
+
+      let doc = null;
+
+      let fitScheduled = false;
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) {
+              continue;
             }
 
-                .page svg {
-                    display: block;
-                    max-width: 100%;
-                    height: auto;
-                }
-        </style>
-    </head>
-    <body>
-        <script type="module">
-            import init, { HwpDocument } from './rhwp.js';
+            const index = Number(entry.target.dataset.pageIndex);
 
-            let renderedPages = [];
-
-            let doc = null;
-
-            let fitScheduled = false;
-
-            const observer = new IntersectionObserver(entries => {
-                for (const entry of entries) {
-                    if (!entry.isIntersecting) {
-                        continue;
-                    }
-
-                    const index = Number(entry.target.dataset.pageIndex);
-
-                    waitIdle().then(() => {
-                        renderPage(index);
-                    });
-
-                    observer.unobserve(entry.target);
-                }
-            }, {
-                root: null,
-                rootMargin: "1200px 0px",
-                threshold: 0.01
-            })
-
-            const parser = new DOMParser();
-
-            function renderPage(index) {
-                try {
-                    const page = renderedPages[index];
-
-                    if (!page || page.rendered || page.rendering) {
-                        return;
-                    }
-
-                    page.rendering = true;
-
-                    const svgText = doc.renderPageSvg(index);
-                    const svg = parser.parseFromString(svgText, "image/svg+xml").documentElement;
-
-                    svg.setAttribute("viewBox", `0 0 ${page.pageWidth} ${page.pageHeight}`);
-                    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-                    svg.style.display = "block";
-                    svg.style.background = "white";
-
-                    page.wrapper.replaceChildren(svg);
-                    page.svg = svg;
-                    page.rendered = true;
-
-                    fitOnePage(page);
-                } catch (error) {
-                    const errorMsg = `page ${index + 1} render failed`
-                    console.error(errorMsg, error);
-                    page.wrapper.textContent = errorMsg
-                }
-                finally {
-                    page.rendering = false;
-                }
-            }
-
-            function fitOnePage(page) {
-                const margin = 24;
-                const availableWidth = Math.max(1, document.documentElement.clientWidth - margin);
-                const scale = availableWidth / page.pageWidth;
-
-                const fittedWidth = Math.floor(page.pageWidth * scale);
-                const fittedHeight = Math.floor(page.pageHeight * scale);
-
-                page.wrapper.style.width = fittedWidth + "px";
-                page.wrapper.style.minHeight = fittedHeight + "px";
-
-                if (page.svg) {
-                    page.svg.setAttribute("width", fittedWidth);
-                    page.svg.setAttribute("height", fittedHeight);
-                }
-            }
-
-            function fitPagesToWidth() {
-                for (const page of renderedPages) {
-                    fitOnePage(page);
-                }
-            }
-
-            const measureCanvas = document.createElement("canvas");
-            const measureCtx = measureCanvas.getContext("2d");
-
-            const textWidthCache = new Map();
-            const MAX_TEXT_WIDTH_CACHE = 30000;
-
-            globalThis.measureTextWidth = (font, text) => {
-                const key = font + "\n" + text;
-
-                const cached = textWidthCache.get(key);
-
-                if (cached !== undefined) {
-                    return cached;
-                }
-
-                measureCtx.font = font;
-                const width = measureCtx.measureText(text).width;
-
-                if (textWidthCache.size < MAX_TEXT_WIDTH_CACHE) {
-                    textWidthCache.set(key, width);
-                }
-
-                return width;
-            };
-
-            function waitIdle() {
-                return new Promise(resolve => {
-                    if ("requestIdleCallback" in window) {
-                        requestIdleCallback(() => resolve(), { timeout: 50 })
-                    } else {
-                        setTimeout(resolve, 0);
-                    }
-                })
-            }
-
-            function scheduleFitPages() {
-                if (fitScheduled) {
-                    return;
-                }
-
-                fitScheduled = true;
-
-                requestAnimationFrame(() => {
-                    fitScheduled = false;
-                    fitPagesToWidth();
-                })
-            }
-
-            function getAvailableWidth() {
-                const viewportWidth = document.documentElement.clientWidth;
-
-                const horizontalMargin = 10;
-
-                return Math.max(1, viewportWidth - horizontalMargin);
-            }
-
-            window.chrome?.webview?.addEventListener('message', (e) => {
-                if (e.data?.type === "host-resize") {
-                    scheduleFitPages();
-                }
+            waitIdle().then(() => {
+              renderPage(index);
             });
 
-            window.addEventListener('resize', scheduleFitPages);
+            observer.unobserve(entry.target);
+          }
+        },
+        {
+          root: null,
+          rootMargin: "1200px 0px",
+          threshold: 0.01,
+        },
+      );
 
-            await init({ module_or_path: '/rhwp_bg.wasm' });
+      const parser = new DOMParser();
 
-            window.loadHwpFromUrl = async function (url) {
-                const response = await fetch(url, { cache: "no-store" });
+      function renderPage(index) {
+        const page = renderedPages[index];
 
-                if (!response.ok) {
-                    throw new Error(`HWP fetch failed: ${response.status} ${response.statusText}`)
-                }
+        try {
+          if (!page || page.rendered || page.rendering) {
+            return;
+          }
 
-                const buffer = await response.arrayBuffer();
-                const bytes = new Uint8Array(buffer);
+          page.rendering = true;
 
-                await loadHwpBytes(bytes);
-            }
+          const svgText = doc.renderPageSvg(index);
+          const svg = parser.parseFromString(
+            svgText,
+            "image/svg+xml",
+          ).documentElement;
 
-            window.hwpViewerReady = true;
+          svg.setAttribute(
+            "viewBox",
+            `0 0 ${page.pageWidth} ${page.pageHeight}`,
+          );
+          svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+          svg.style.display = "block";
+          svg.style.background = "white";
 
-            window.chrome?.webview?.postMessage({
-                type: "viewer-ready"
-            });
+          page.wrapper.replaceChildren(svg);
+          page.svg = svg;
+          page.rendered = true;
 
-            async function loadHwpBytes(bytes) {
-                document.body.innerHTML = "";
-                renderedPages = [];
+          fitOnePage(page);
+        } catch (error) {
+          const errorMsg = `page ${index + 1} render failed`;
+          console.error(errorMsg, error);
+          page.wrapper.textContent = errorMsg;
+        } finally {
+          page.rendering = false;
+        }
+      }
 
-                doc = new HwpDocument(bytes);
+      function fitOnePage(page) {
+        const margin = 24;
+        const availableWidth = Math.max(
+          1,
+          document.documentElement.clientWidth - margin,
+        );
+        const scale = availableWidth / page.pageWidth;
 
-                const pageCount = doc.pageCount();
+        const fittedWidth = Math.floor(page.pageWidth * scale);
+        const fittedHeight = Math.floor(page.pageHeight * scale);
 
-                for (let i = 0; i < pageCount; i++) {
-                    const pageInfo = JSON.parse(doc.getPageInfo(i));
+        page.wrapper.style.width = fittedWidth + "px";
+        page.wrapper.style.minHeight = fittedHeight + "px";
 
-                    const page = {
-                        index: i,
-                        pageWidth: pageInfo.width,
-                        pageHeight: pageInfo.height,
-                        wrapper: document.createElement("div"),
-                        svg: null,
-                        rendered: false,
-                        rendering: false
-                    }
+        if (page.svg) {
+          page.svg.setAttribute("width", fittedWidth);
+          page.svg.setAttribute("height", fittedHeight);
+        }
+      }
 
-                    page.wrapper.className = "page";
-                    page.wrapper.textContent = `Loading page ${i + 1}...`;
-                    page.wrapper.dataset.pageIndex = String(i);
+      function fitPagesToWidth() {
+        for (const page of renderedPages) {
+          fitOnePage(page);
+        }
+      }
 
-                    document.body.appendChild(page.wrapper);
-                    renderedPages.push(page);
+      const measureCanvas = document.createElement("canvas");
+      const measureCtx = measureCanvas.getContext("2d");
 
-                    if (i !== 0) {
-                        observer.observe(page.wrapper);
-                    }
-                }
+      const textWidthCache = new Map();
+      const MAX_TEXT_WIDTH_CACHE = 30000;
 
-                fitPagesToWidth();
+      globalThis.measureTextWidth = (font, text) => {
+        const key = font + "\n" + text;
 
-                if (pageCount > 0) {
-                    renderPage(0);
-                }
-            };
-        </script>
-    </body>
+        const cached = textWidthCache.get(key);
+
+        if (cached !== undefined) {
+          return cached;
+        }
+
+        measureCtx.font = font;
+        const width = measureCtx.measureText(text).width;
+
+        if (textWidthCache.size < MAX_TEXT_WIDTH_CACHE) {
+          textWidthCache.set(key, width);
+        }
+
+        return width;
+      };
+
+      function waitIdle() {
+        return new Promise((resolve) => {
+          if ("requestIdleCallback" in window) {
+            requestIdleCallback(() => resolve(), { timeout: 50 });
+          } else {
+            setTimeout(resolve, 0);
+          }
+        });
+      }
+
+      function scheduleFitPages() {
+        if (fitScheduled) {
+          return;
+        }
+
+        fitScheduled = true;
+
+        requestAnimationFrame(() => {
+          fitScheduled = false;
+          fitPagesToWidth();
+        });
+      }
+
+      window.chrome?.webview?.addEventListener("message", (e) => {
+        if (e.data?.type === "host-resize") {
+          scheduleFitPages();
+        }
+      });
+
+      window.addEventListener("resize", scheduleFitPages);
+
+      await init({ module_or_path: "/rhwp_bg.wasm" });
+
+      window.loadHwpFromUrl = async function (url) {
+        const response = await fetch(url, { cache: "no-store" });
+
+        if (!response.ok) {
+          throw new Error(
+            `HWP fetch failed: ${response.status} ${response.statusText}`,
+          );
+        }
+
+        const buffer = await response.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+
+        await loadHwpBytes(bytes);
+      };
+
+      window.hwpViewerReady = true;
+
+      window.chrome?.webview?.postMessage({
+        type: "viewer-ready",
+      });
+
+      async function loadHwpBytes(bytes) {
+        document.body.innerHTML = "";
+        renderedPages = [];
+
+        doc = new HwpDocument(bytes);
+
+        const pageCount = doc.pageCount();
+
+        for (let i = 0; i < pageCount; i++) {
+          const pageInfo = JSON.parse(doc.getPageInfo(i));
+
+          const page = {
+            index: i,
+            pageWidth: pageInfo.width,
+            pageHeight: pageInfo.height,
+            wrapper: document.createElement("div"),
+            svg: null,
+            rendered: false,
+            rendering: false,
+          };
+
+          page.wrapper.className = "page";
+          page.wrapper.textContent = `Loading page ${i + 1}...`;
+          page.wrapper.dataset.pageIndex = String(i);
+
+          document.body.appendChild(page.wrapper);
+          renderedPages.push(page);
+
+          if (i !== 0) {
+            observer.observe(page.wrapper);
+          }
+        }
+
+        fitPagesToWidth();
+
+        if (pageCount > 0) {
+          renderPage(0);
+        }
+      }
+    </script>
+</body>
 </html>

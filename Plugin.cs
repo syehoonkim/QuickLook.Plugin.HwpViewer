@@ -5,12 +5,8 @@ using QuickLook.Common.Plugin;
 using QuickLook.Common.Helpers;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
-using System.Xml.Linq;
-using System.Globalization;
 using System.Windows.Threading;
 using Newtonsoft.Json;
-using System.Collections.Generic;
-using System.Security.Cryptography.X509Certificates;
 
 namespace QuickLook.Plugin.Hwp
 {
@@ -83,32 +79,6 @@ namespace QuickLook.Plugin.Hwp
                     var env = await CoreWebView2Environment.CreateAsync();
                     await viewer.EnsureCoreWebView2Async(env);
 
-                    const string pluginSubPath = @"QuickLook.Plugin\QuickLook.Plugin.HwpViewer";
-
-                    var result = new List<string>();
-
-                    string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                    string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-
-                    string[] basePaths =
-                    {
-                        Path.Combine(appData, @"pooi.moe\QuickLook"),
-                        Path.Combine(appData, @"pooi.moe\QuickLook\UserData"),
-                        Path.Combine(localAppData, @"pooi.moe\QuickLook"),
-                        Path.Combine(
-                            localAppData,
-                            @"Packages\21090PaddyXu.QuickLook_egxr34yet59cg\LocalCache\Roaming\pooi.moe\QuickLook"
-                        )
-                    };
-
-                    foreach (var basePath in basePaths)
-                    {
-                        if (!Directory.Exists(basePath))
-                            continue;
-
-                        result.Add(Path.Combine(basePath, pluginSubPath));
-                    }
-
                     string webRoot = ResolveWebRoot();
 
                     const string appHost = "app";
@@ -135,9 +105,16 @@ namespace QuickLook.Plugin.Hwp
                             }
 
                             loadRequested = true;
-
-                            string js = $"window.loadHwpFromUrl({JsonConvert.SerializeObject(hwpUrl)});";
-                            await viewer.ExecuteScriptAsync(js);
+                            try
+                            {
+                                string js = $"window.loadHwpFromUrl({JsonConvert.SerializeObject(hwpUrl)});";
+                                await viewer.ExecuteScriptAsync(js);
+                            }
+                            catch
+                            {
+                                loadRequested = false;
+                                throw;
+                            }
 
                             viewer.CoreWebView2.PostWebMessageAsJson(
                             JsonConvert.SerializeObject(new
@@ -182,7 +159,7 @@ namespace QuickLook.Plugin.Hwp
 
                         if (!File.Exists(path))
                         {
-                            e.Response = viewer.CoreWebView2.Environment.CreateWebResourceResponse(Stream.Null, 404, "Not Found", responseHeaders + "Conteht-Type: text/plain\r\n");
+                            e.Response = viewer.CoreWebView2.Environment.CreateWebResourceResponse(Stream.Null, 404, "Not Found", responseHeaders + "Content-Type: text/plain\r\n");
                             return;
                         }
 
@@ -191,7 +168,7 @@ namespace QuickLook.Plugin.Hwp
                         e.Response = viewer.CoreWebView2.Environment.CreateWebResourceResponse(stream, 200, "OK", responseHeaders + "Content-Type: application/octet-stream\r\n");
                     };
 
-                    viewer.CoreWebView2.NavigationCompleted += async (_, e) =>
+                    viewer.CoreWebView2.NavigationCompleted += (_, e) =>
                     {
                         if (!e.IsSuccess)
                         {
