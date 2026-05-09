@@ -71,7 +71,10 @@ jobs:
 
           cd external/rhwp
 
-          cp .env.docker.example .env.docker
+          printf "UID=%s\nGID=%s\n" "$(id -u)" "$(id -g)" > .env.docker
+
+          cat .env.docker
+
           docker compose --env-file .env.docker run --rm wasm
 
       - name: Verify rhwp WASM artifacts
