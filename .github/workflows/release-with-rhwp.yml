@@ -1,0 +1,219 @@
+name: Release with updated rhwp
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 18 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-with-rhwp
+  cancel-in-progress: false
+
+jobs:
+  update-rhwp:
+    name: Update rhwp and create plugin version tag
+    runs-on: ubuntu-latest
+
+    outputs:
+      changed: ${{ steps.changes.outputs.changed }}
+      plugin_version: ${{ steps.version.outputs.plugin_version }}
+      rhwp_tag: ${{ steps.rhwp.outputs.rhwp_tag }}
+      rhwp_rev: ${{ steps.rhwp.outputs.rhwp_rev }}
+
+    steps:
+      - name: Checkout repository with submodules and tags
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Update rhwp submodule to latest tag
+        id: rhwp
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd external/rhwp
+
+          git fetch --tags origin
+
+          RHWP_TAG="$(git tag --sort=-v:refname | head -n 1)"
+
+          if [ -z "$RHWP_TAG" ]; then
+            echo "No rhwp tag found."
+            exit 1
+          fi
+
+          git checkout "$RHWP_TAG"
+
+          RHWP_REV="$(git rev-parse HEAD)"
+
+          echo "rhwp_tag=$RHWP_TAG" >> "$GITHUB_OUTPUT"
+          echo "rhwp_rev=$RHWP_REV" >> "$GITHUB_OUTPUT"
+
+          cd ../..
+          echo "$RHWP_REV" > RHWP_REVISION
+
+      - name: Build rhwp WASM with Docker
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd external/rhwp
+
+          cp .env.docker.example .env.docker
+          docker compose --env-file .env.docker run --rm wasm
+
+      - name: Verify rhwp WASM artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -s external/rhwp/pkg/rhwp.js
+          test -s external/rhwp/pkg/rhwp_bg.wasm
+
+      - name: Copy rhwp artifacts to plugin root
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cp external/rhwp/pkg/rhwp.js ./rhwp.js
+          cp external/rhwp/pkg/rhwp_bg.wasm ./rhwp_bg.wasm
+
+      - name: Check whether rhwp update changed repository
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if git diff --quiet -- external/rhwp rhwp.js rhwp_bg.wasm RHWP_REVISION; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No rhwp-related changes."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "rhwp-related changes detected."
+          fi
+
+      - name: Calculate next plugin patch version
+        id: version
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          LAST_TAG="$(git tag --list '[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
+
+          if [ -z "$LAST_TAG" ]; then
+            NEXT_TAG="0.0.1"
+          else
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$LAST_TAG"
+
+            if ! [[ "$MAJOR" =~ ^[0-9]+$ && "$MINOR" =~ ^[0-9]+$ && "$PATCH" =~ ^[0-9]+$ ]]; then
+              echo "Invalid latest plugin version tag: $LAST_TAG"
+              exit 1
+            fi
+
+            PATCH=$((PATCH + 1))
+            NEXT_TAG="${MAJOR}.${MINOR}.${PATCH}"
+          fi
+
+          if git rev-parse "$NEXT_TAG" >/dev/null 2>&1; then
+            echo "Tag already exists: $NEXT_TAG"
+            exit 1
+          fi
+
+          echo "plugin_version=$NEXT_TAG" >> "$GITHUB_OUTPUT"
+          echo "Next plugin version: $NEXT_TAG"
+
+      - name: Commit rhwp update and create plugin version tag
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git add external/rhwp rhwp.js rhwp_bg.wasm RHWP_REVISION
+
+          git commit -m "Update rhwp to ${{ steps.rhwp.outputs.rhwp_tag }}"
+
+          git tag "${{ steps.version.outputs.plugin_version }}"
+
+          git push origin HEAD
+          git push origin "${{ steps.version.outputs.plugin_version }}"
+
+  build-and-release:
+    name: Build plugin, pack qlplugin, and create release
+    needs: update-rhwp
+    if: needs.update-rhwp.outputs.changed == 'true'
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout plugin version tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.update-rhwp.outputs.plugin_version }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore NuGet packages
+        shell: pwsh
+        run: |
+          nuget restore QuickLook.Plugin.HwpViewer.sln
+
+      - name: Generate version files from git tag
+        shell: pwsh
+        run: |
+          ./Scripts/update-version.ps1
+
+      - name: Build Release
+        shell: pwsh
+        run: |
+          msbuild QuickLook.Plugin.HwpViewer.sln /p:Configuration=Release /p:Platform="Any CPU"
+
+      - name: Pack qlplugin
+        shell: pwsh
+        run: |
+          ./Scripts/pack-zip.ps1
+
+      - name: Verify package
+        shell: pwsh
+        run: |
+          if (!(Test-Path "./QuickLook.Plugin.HwpViewer.qlplugin")) {
+            throw "QuickLook.Plugin.HwpViewer.qlplugin was not created."
+          }
+
+          $size = (Get-Item "./QuickLook.Plugin.HwpViewer.qlplugin").Length
+
+          if ($size -le 0) {
+            throw "QuickLook.Plugin.HwpViewer.qlplugin is empty."
+          }
+
+          Write-Host "Package size: $size bytes"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh release create "${{ needs.update-rhwp.outputs.plugin_version }}" \
+            "QuickLook.Plugin.HwpViewer.qlplugin" \
+            --title "QuickLook.Plugin.HwpViewer ${{ needs.update-rhwp.outputs.plugin_version }}" \
+            --notes "Bundled rhwp tag: ${{ needs.update-rhwp.outputs.rhwp_tag }}
+          Bundled rhwp revision: ${{ needs.update-rhwp.outputs.rhwp_rev }}"
