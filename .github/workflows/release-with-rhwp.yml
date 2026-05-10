@@ -1,9 +1,10 @@
+# .github/workflows/release-with-rhwp.yml
 name: Release with updated rhwp
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 18 * * *"
+    - cron: "0 18 * * *" # 매일 KST 03:00, UTC 기준
 
 permissions:
   contents: write
@@ -14,14 +15,15 @@ concurrency:
 
 jobs:
   update-rhwp:
-    name: Update rhwp and create plugin version tag
+    name: Check rhwp update and create plugin version tag
     runs-on: ubuntu-latest
 
     outputs:
+      updated: ${{ steps.rhwp_check.outputs.updated }}
       changed: ${{ steps.changes.outputs.changed }}
       plugin_version: ${{ steps.version.outputs.plugin_version }}
-      rhwp_tag: ${{ steps.rhwp.outputs.rhwp_tag }}
-      rhwp_rev: ${{ steps.rhwp.outputs.rhwp_rev }}
+      rhwp_tag: ${{ steps.rhwp_check.outputs.rhwp_tag }}
+      rhwp_rev: ${{ steps.rhwp_check.outputs.latest_rev }}
 
     steps:
       - name: Checkout repository with submodules and tags
@@ -37,34 +39,53 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Update rhwp submodule to latest tag
-        id: rhwp
+      - name: Check latest rhwp tag against current submodule
+        id: rhwp_check
         shell: bash
         run: |
           set -euo pipefail
 
-          cd external/rhwp
+          CURRENT_REV="$(git -C external/rhwp rev-parse HEAD)"
 
-          git fetch --tags origin
+          git -C external/rhwp fetch --tags origin
 
-          RHWP_TAG="$(git tag --sort=-v:refname | head -n 1)"
+          RHWP_TAG="$(git -C external/rhwp tag --sort=-v:refname | head -n 1)"
 
           if [ -z "$RHWP_TAG" ]; then
             echo "No rhwp tag found."
             exit 1
           fi
 
-          git checkout "$RHWP_TAG"
+          LATEST_REV="$(git -C external/rhwp rev-list -n 1 "$RHWP_TAG")"
 
-          RHWP_REV="$(git rev-parse HEAD)"
-
+          echo "current_rev=$CURRENT_REV" >> "$GITHUB_OUTPUT"
           echo "rhwp_tag=$RHWP_TAG" >> "$GITHUB_OUTPUT"
-          echo "rhwp_rev=$RHWP_REV" >> "$GITHUB_OUTPUT"
+          echo "latest_rev=$LATEST_REV" >> "$GITHUB_OUTPUT"
 
-          cd ../..
-          echo "$RHWP_REV" > RHWP_REVISION
+          echo "Current rhwp revision: $CURRENT_REV"
+          echo "Latest rhwp tag: $RHWP_TAG"
+          echo "Latest rhwp revision: $LATEST_REV"
+
+          if [ "$CURRENT_REV" = "$LATEST_REV" ]; then
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            echo "rhwp is already up to date."
+          else
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+            echo "new rhwp revision detected."
+          fi
+
+      - name: Update rhwp submodule to latest tag
+        if: steps.rhwp_check.outputs.updated == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git -C external/rhwp checkout "${{ steps.rhwp_check.outputs.rhwp_tag }}"
+
+          echo "${{ steps.rhwp_check.outputs.latest_rev }}" > RHWP_REVISION
 
       - name: Build rhwp WASM with Docker
+        if: steps.rhwp_check.outputs.updated == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -73,11 +94,13 @@ jobs:
 
           printf "UID=%s\nGID=%s\n" "$(id -u)" "$(id -g)" > .env.docker
 
+          echo "Using Docker build user:"
           cat .env.docker
 
           docker compose --env-file .env.docker run --rm wasm
 
       - name: Verify rhwp WASM artifacts
+        if: steps.rhwp_check.outputs.updated == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -86,6 +109,7 @@ jobs:
           test -s external/rhwp/pkg/rhwp_bg.wasm
 
       - name: Copy rhwp artifacts to plugin root
+        if: steps.rhwp_check.outputs.updated == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -95,13 +119,14 @@ jobs:
 
       - name: Check whether rhwp update changed repository
         id: changes
+        if: steps.rhwp_check.outputs.updated == 'true'
         shell: bash
         run: |
           set -euo pipefail
 
           if git diff --quiet -- external/rhwp rhwp.js rhwp_bg.wasm RHWP_REVISION; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No rhwp-related changes."
+            echo "No rhwp-related changes after build."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "rhwp-related changes detected."
@@ -146,7 +171,7 @@ jobs:
 
           git add external/rhwp rhwp.js rhwp_bg.wasm RHWP_REVISION
 
-          git commit -m "Update rhwp to ${{ steps.rhwp.outputs.rhwp_tag }}"
+          git commit -m "Update rhwp to ${{ steps.rhwp_check.outputs.rhwp_tag }}"
 
           git tag "${{ steps.version.outputs.plugin_version }}"
 
@@ -168,10 +193,10 @@ jobs:
           fetch-depth: 0
 
       - name: Setup NuGet
-        uses: NuGet/setup-nuget@v2
+        uses: NuGet/setup-nuget@v3
 
       - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@v3
 
       - name: Restore NuGet packages
         shell: pwsh
