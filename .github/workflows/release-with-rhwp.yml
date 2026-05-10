@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - name: Checkout repository with submodules and tags
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
           fetch-depth: 0
@@ -161,7 +161,7 @@ jobs:
 
     steps:
       - name: Checkout plugin version tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ needs.update-rhwp.outputs.plugin_version }}
           submodules: recursive
