@@ -216,6 +216,7 @@ jobs:
       - name: Pack qlplugin
         shell: pwsh
         run: |
+          Set-Location ./Scripts
           ./Scripts/pack-zip.ps1
 
       - name: Verify package
