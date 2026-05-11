@@ -3,6 +3,11 @@ name: Release with updated rhwp
 
 on:
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Existing plugin version tag to build and release only, e.g. 0.1.2"
+        required: false
+        type: string
   schedule:
     - cron: "0 18 * * *" # 매일 KST 03:00, UTC 기준
 
@@ -19,14 +24,21 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      updated: ${{ steps.rhwp_check.outputs.updated }}
       changed: ${{ steps.changes.outputs.changed }}
       plugin_version: ${{ steps.version.outputs.plugin_version }}
       rhwp_tag: ${{ steps.rhwp_check.outputs.rhwp_tag }}
       rhwp_rev: ${{ steps.rhwp_check.outputs.latest_rev }}
 
     steps:
+      - name: Manual release mode
+        if: github.event_name == 'workflow_dispatch' && inputs.release_version != ''
+        shell: bash
+        run: |
+          echo "Manual release mode for existing tag: ${{ inputs.release_version }}"
+          echo "Skipping rhwp update detection and mutation steps."
+
       - name: Checkout repository with submodules and tags
+        if: github.event_name != 'workflow_dispatch' || inputs.release_version == ''
         uses: actions/checkout@v6
         with:
           submodules: recursive
@@ -34,6 +46,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure git identity
+        if: github.event_name != 'workflow_dispatch' || inputs.release_version == ''
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
@@ -41,6 +54,7 @@ jobs:
 
       - name: Check latest rhwp tag against current submodule
         id: rhwp_check
+        if: github.event_name != 'workflow_dispatch' || inputs.release_version == ''
         shell: bash
         run: |
           set -euo pipefail
@@ -81,7 +95,6 @@ jobs:
           set -euo pipefail
 
           git -C external/rhwp checkout "${{ steps.rhwp_check.outputs.rhwp_tag }}"
-
           echo "${{ steps.rhwp_check.outputs.latest_rev }}" > RHWP_REVISION
 
       - name: Build rhwp WASM with Docker
@@ -181,16 +194,56 @@ jobs:
   build-and-release:
     name: Build plugin, pack qlplugin, and create release
     needs: update-rhwp
-    if: needs.update-rhwp.outputs.changed == 'true'
+    if: needs.update-rhwp.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
     runs-on: windows-latest
 
     steps:
+      - name: Resolve release version
+        id: release_version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.release_version }}" -ne "") {
+            $version = "${{ inputs.release_version }}"
+          }
+          else {
+            $version = "${{ needs.update-rhwp.outputs.plugin_version }}"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "Release version could not be resolved."
+          }
+
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Release version: $version"
+
       - name: Checkout plugin version tag
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.update-rhwp.outputs.plugin_version }}
+          ref: ${{ steps.release_version.outputs.version }}
           submodules: recursive
           fetch-depth: 0
+
+      - name: Read bundled rhwp metadata
+        id: bundled_rhwp
+        shell: pwsh
+        run: |
+          if (Test-Path "./RHWP_REVISION") {
+            $rev = (Get-Content "./RHWP_REVISION" -Raw).Trim()
+          }
+          else {
+            $rev = (git -C external/rhwp rev-parse HEAD).Trim()
+          }
+
+          $tag = git -C external/rhwp describe --tags --exact-match 2>$null
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            $tag = "unknown"
+          }
+
+          "rhwp_rev=$rev" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "rhwp_tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          Write-Host "Bundled rhwp tag: $tag"
+          Write-Host "Bundled rhwp revision: $rev"
 
       - name: Setup NuGet
         uses: NuGet/setup-nuget@v3
@@ -215,9 +268,9 @@ jobs:
 
       - name: Pack qlplugin
         shell: pwsh
+        working-directory: ./Scripts
         run: |
-          Set-Location ./Scripts
-          ./Scripts/pack-zip.ps1
+          ./pack-zip.ps1
 
       - name: Verify package
         shell: pwsh
@@ -237,12 +290,15 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.release_version.outputs.version }}
+          RHWP_TAG: ${{ steps.bundled_rhwp.outputs.rhwp_tag }}
+          RHWP_REV: ${{ steps.bundled_rhwp.outputs.rhwp_rev }}
         shell: bash
         run: |
           set -euo pipefail
 
-          gh release create "${{ needs.update-rhwp.outputs.plugin_version }}" \
+          gh release create "$RELEASE_VERSION" \
             "QuickLook.Plugin.HwpViewer.qlplugin" \
-            --title "QuickLook.Plugin.HwpViewer ${{ needs.update-rhwp.outputs.plugin_version }}" \
-            --notes "Bundled rhwp tag: ${{ needs.update-rhwp.outputs.rhwp_tag }}
-          Bundled rhwp revision: ${{ needs.update-rhwp.outputs.rhwp_rev }}"
+            --title "QuickLook.Plugin.HwpViewer $RELEASE_VERSION" \
+            --notes "Bundled rhwp tag: $RHWP_TAG
+          Bundled rhwp revision: $RHWP_REV"
