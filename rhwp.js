@@ -1471,6 +1471,34 @@ export class HwpDocument {
         }
     }
     /**
+     * CanvasKit direct replay/compat overlay 정책 진단을 JSON 문자열로 반환한다.
+     *
+     * `mode` 는 `"default"` 또는 `"compat"` 를 받는다. 빈 문자열은 `"default"` 로 처리한다.
+     * @param {number} page_num
+     * @param {string} mode
+     * @returns {string}
+     */
+    getCanvasKitReplayPlan(page_num, mode) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(mode, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.hwpdocument_getCanvasKitReplayPlan(this.__wbg_ptr, page_num, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
      * 문서에 저장된 캐럿 위치를 반환한다 (문서 로딩 시 캐럿 자동 배치용).
      *
      * 반환: JSON `{"sectionIndex":N,"paragraphIndex":N,"charOffset":N}`
@@ -2482,6 +2510,35 @@ export class HwpDocument {
         }
     }
     /**
+     * [Task #825] 머리말/꼬리말 안 그림의 속성 조회.
+     * path: section[si].paragraphs[outer_para].controls[outer_ctrl] = Header/Footer
+     *       → .paragraphs[inner_para].controls[inner_ctrl] = Picture
+     * @param {number} section_idx
+     * @param {number} outer_para_idx
+     * @param {number} outer_control_idx
+     * @param {number} inner_para_idx
+     * @param {number} inner_control_idx
+     * @returns {string}
+     */
+    getHeaderFooterPictureProperties(section_idx, outer_para_idx, outer_control_idx, inner_para_idx, inner_control_idx) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.hwpdocument_getHeaderFooterPictureProperties(this.__wbg_ptr, section_idx, outer_para_idx, outer_control_idx, inner_para_idx, inner_control_idx);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
      * 문단 내 줄 정보를 반환한다 (커서 수직 이동/Home/End용).
      *
      * 반환: JSON `{"lineIndex":N,"lineCount":N,"charStart":N,"charEnd":N}`
@@ -2721,6 +2778,29 @@ export class HwpDocument {
         let deferred2_1;
         try {
             const ret = wasm.hwpdocument_getPageOfPosition(this.__wbg_ptr, section_idx, para_idx);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * 페이지 overlay 이미지 정보만 JSON 문자열로 반환한다.
+     * @param {number} page_num
+     * @returns {string}
+     */
+    getPageOverlayImages(page_num) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.hwpdocument_getPageOverlayImages(this.__wbg_ptr, page_num);
             var ptr1 = ret[0];
             var len1 = ret[1];
             if (ret[3]) {
@@ -3734,6 +3814,32 @@ export class HwpDocument {
         let deferred2_1;
         try {
             const ret = wasm.hwpdocument_insertFootnote(this.__wbg_ptr, section_idx, para_idx, char_offset);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * 새 번호 지정 컨트롤 삽입 (쪽 > 새 번호로 시작)
+     * @param {number} section_idx
+     * @param {number} para_idx
+     * @param {number} char_offset
+     * @param {number} start_num
+     * @returns {string}
+     */
+    insertNewNumber(section_idx, para_idx, char_offset, start_num) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.hwpdocument_insertNewNumber(this.__wbg_ptr, section_idx, para_idx, char_offset, start_num);
             var ptr1 = ret[0];
             var len1 = ret[1];
             if (ret[3]) {
@@ -5018,6 +5124,33 @@ export class HwpDocument {
         return ret >>> 0;
     }
     /**
+     * 문서 전체 검색 (모든 매치 반환)
+     * @param {string} query
+     * @param {boolean} case_sensitive
+     * @param {boolean} include_cells
+     * @returns {string}
+     */
+    searchAllText(query, case_sensitive, include_cells) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(query, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.hwpdocument_searchAllText(this.__wbg_ptr, ptr0, len0, case_sensitive, include_cells);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
      * 문서 텍스트 검색
      * @param {string} query
      * @param {number} from_sec
@@ -5326,6 +5459,36 @@ export class HwpDocument {
             const ptr0 = passStringToWasm0(value_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
             const len0 = WASM_VECTOR_LEN;
             const ret = wasm.hwpdocument_setFormValueInCell(this.__wbg_ptr, sec, table_para, table_ci, cell_idx, cell_para, form_ci, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * [Task #825] 머리말/꼬리말 안 그림 속성 변경.
+     * @param {number} section_idx
+     * @param {number} outer_para_idx
+     * @param {number} outer_control_idx
+     * @param {number} inner_para_idx
+     * @param {number} inner_control_idx
+     * @param {string} props_json
+     * @returns {string}
+     */
+    setHeaderFooterPictureProperties(section_idx, outer_para_idx, outer_control_idx, inner_para_idx, inner_control_idx, props_json) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(props_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.hwpdocument_setHeaderFooterPictureProperties(this.__wbg_ptr, section_idx, outer_para_idx, outer_control_idx, inner_para_idx, inner_control_idx, ptr0, len0);
             var ptr2 = ret[0];
             var len2 = ret[1];
             if (ret[3]) {
@@ -6151,6 +6314,9 @@ function __wbg_get_imports() {
         __wbg_bezierCurveTo_2d7f81b72815a6e9: function(arg0, arg1, arg2, arg3, arg4, arg5, arg6) {
             arg0.bezierCurveTo(arg1, arg2, arg3, arg4, arg5, arg6);
         },
+        __wbg_clearRect_1ea64f387215d3b8: function(arg0, arg1, arg2, arg3, arg4) {
+            arg0.clearRect(arg1, arg2, arg3, arg4);
+        },
         __wbg_clip_3e048b00cfa42214: function(arg0) {
             arg0.clip();
         },
@@ -6251,7 +6417,7 @@ function __wbg_get_imports() {
         __wbg_lineTo_72d6b123d28ab168: function(arg0, arg1, arg2) {
             arg0.lineTo(arg1, arg2);
         },
-        __wbg_measureTextWidth_901ed7352fe21440: function(arg0, arg1, arg2, arg3) {
+        __wbg_measureTextWidth_86598426d2c41d7b: function(arg0, arg1, arg2, arg3) {
             const ret = globalThis.measureTextWidth(getStringFromWasm0(arg0, arg1), getStringFromWasm0(arg2, arg3));
             return ret;
         },
