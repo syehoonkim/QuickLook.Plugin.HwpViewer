@@ -22,6 +22,8 @@ jobs:
   update-rhwp:
     name: Check rhwp update and create plugin version tag
     runs-on: ubuntu-latest
+    env:
+      GIT_LFS_SKIP_SMUDGE: "1"
 
     outputs:
       changed: ${{ steps.changes.outputs.changed }}
@@ -37,13 +39,34 @@ jobs:
           echo "Manual release mode for existing tag: ${{ inputs.release_version }}"
           echo "Skipping rhwp update detection and mutation steps."
 
-      - name: Checkout repository with submodules and tags
-        if: github.event_name != 'workflow_dispatch' || inputs.release_version == ''
+      - name: Checkout repository with tags
         uses: actions/checkout@v6
         with:
-          submodules: recursive
+          submodules: false
           fetch-depth: 0
+          lfs: false
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git LFS to skip smudge
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git lfs install --skip-smudge --global
+
+          git config --global filter.lfs.smudge "git-lfs smudge --skip -- %f"
+          git config --global filter.lfs.process "git-lfs filter-process --skip"
+          git config --global filter.lfs.required false
+
+      - name: Initialize submodules without downloading LFS files
+        shell: bash
+        env:
+          GIT_LFS_SKIP_SMUDGE: "1"
+        run: |
+          set -euo pipefail
+
+          git submodule sync --recursive
+          git submodule update --init --recursive
 
       - name: Configure git identity
         if: github.event_name != 'workflow_dispatch' || inputs.release_version == ''
@@ -196,6 +219,8 @@ jobs:
     needs: update-rhwp
     if: needs.update-rhwp.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
     runs-on: windows-latest
+    env:
+      GIT_LFS_SKIP_SMUDGE: "1"
 
     steps:
       - name: Resolve release version
@@ -220,8 +245,26 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ steps.release_version.outputs.version }}
-          submodules: recursive
+          submodules: false
           fetch-depth: 0
+          lfs: false
+
+      - name: Configure Git LFS to skip smudge
+        shell: pwsh
+        run: |
+          git lfs install --skip-smudge --global
+
+          git config --global filter.lfs.smudge "git-lfs smudge --skip -- %f"
+          git config --global filter.lfs.process "git-lfs filter-process --skip"
+          git config --global filter.lfs.required false
+
+      - name: Initialize submodules without downloading LFS files
+        shell: pwsh
+        env:
+          GIT_LFS_SKIP_SMUDGE: "1"
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive
 
       - name: Read bundled rhwp metadata
         id: bundled_rhwp
