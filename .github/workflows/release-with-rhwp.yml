@@ -8,6 +8,7 @@ on:
         description: "Existing plugin version tag to build and release only, e.g. 0.1.2"
         required: false
         type: string
+
   schedule:
     - cron: "0 18 * * *" # 매일 KST 03:00, UTC 기준
 
@@ -22,6 +23,7 @@ jobs:
   update-rhwp:
     name: Check rhwp update and create plugin version tag
     runs-on: ubuntu-latest
+
     env:
       GIT_LFS_SKIP_SMUDGE: "1"
 
@@ -40,6 +42,7 @@ jobs:
           echo "Skipping rhwp update detection and mutation steps."
 
       - name: Checkout repository with tags
+        if: github.event_name != 'workflow_dispatch' || inputs.release_version == ''
         uses: actions/checkout@v6
         with:
           submodules: false
@@ -48,17 +51,18 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure Git LFS to skip smudge
+        if: github.event_name != 'workflow_dispatch' || inputs.release_version == ''
         shell: bash
         run: |
           set -euo pipefail
 
-          git lfs install --skip-smudge --global
-
+          git lfs install --skip-smudge --skip-repo
           git config --global filter.lfs.smudge "git-lfs smudge --skip -- %f"
           git config --global filter.lfs.process "git-lfs filter-process --skip"
           git config --global filter.lfs.required false
 
       - name: Initialize submodules without downloading LFS files
+        if: github.event_name != 'workflow_dispatch' || inputs.release_version == ''
         shell: bash
         env:
           GIT_LFS_SKIP_SMUDGE: "1"
@@ -114,6 +118,8 @@ jobs:
       - name: Update rhwp submodule to latest tag
         if: steps.rhwp_check.outputs.updated == 'true'
         shell: bash
+        env:
+          GIT_LFS_SKIP_SMUDGE: "1"
         run: |
           set -euo pipefail
 
@@ -219,6 +225,7 @@ jobs:
     needs: update-rhwp
     if: needs.update-rhwp.outputs.changed == 'true' || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')
     runs-on: windows-latest
+
     env:
       GIT_LFS_SKIP_SMUDGE: "1"
 
@@ -252,8 +259,7 @@ jobs:
       - name: Configure Git LFS to skip smudge
         shell: pwsh
         run: |
-          git lfs install --skip-smudge --global
-
+          git lfs install --skip-smudge --skip-repo
           git config --global filter.lfs.smudge "git-lfs smudge --skip -- %f"
           git config --global filter.lfs.process "git-lfs filter-process --skip"
           git config --global filter.lfs.required false
@@ -340,8 +346,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          gh release create "$RELEASE_VERSION" \
-            "QuickLook.Plugin.HwpViewer.qlplugin" \
-            --title "QuickLook.Plugin.HwpViewer $RELEASE_VERSION" \
-            --notes "Bundled rhwp tag: $RHWP_TAG
+          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "Release $RELEASE_VERSION already exists. Uploading asset with clobber."
+            gh release upload "$RELEASE_VERSION" \
+              "QuickLook.Plugin.HwpViewer.qlplugin" \
+              --clobber
+          else
+            gh release create "$RELEASE_VERSION" \
+              "QuickLook.Plugin.HwpViewer.qlplugin" \
+              --title "QuickLook.Plugin.HwpViewer $RELEASE_VERSION" \
+              --notes "Bundled rhwp tag: $RHWP_TAG
           Bundled rhwp revision: $RHWP_REV"
+          fi
