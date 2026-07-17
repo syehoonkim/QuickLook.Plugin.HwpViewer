@@ -361,6 +361,50 @@ export class HwpDocument {
         }
     }
     /**
+     * [Task #2230] 기존 Picture 컨트롤에 이미지를 지정한다 — 그림 미지정
+     * placeholder(missing image 컨트롤)의 편집 뷰 그림 삽입.
+     *
+     * `cell_path_json` 이 빈 문자열 또는 `"[]"` 면 본문 문단의 컨트롤,
+     * 그 외에는 셀/글상자 안 문단의 컨트롤을 대상으로 한다. 개체 틀 크기는
+     * 유지되고(한컴 placeholder 는 틀에 그림을 맞춤) BinData 등록 규칙은
+     * insertPicture 와 공유한다.
+     *
+     * 반환: `{"ok":true,"binDataId":<N>}`
+     * @param {number} section_idx
+     * @param {number} parent_para_idx
+     * @param {string} cell_path_json
+     * @param {number} control_idx
+     * @param {Uint8Array} image_data
+     * @param {number} natural_width_px
+     * @param {number} natural_height_px
+     * @param {string} extension
+     * @returns {string}
+     */
+    assignPictureImage(section_idx, parent_para_idx, cell_path_json, control_idx, image_data, natural_width_px, natural_height_px, extension) {
+        let deferred5_0;
+        let deferred5_1;
+        try {
+            const ptr0 = passStringToWasm0(cell_path_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passArray8ToWasm0(image_data, wasm.__wbindgen_malloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(extension, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len2 = WASM_VECTOR_LEN;
+            const ret = wasm.hwpdocument_assignPictureImage(this.__wbg_ptr, section_idx, parent_para_idx, ptr0, len0, control_idx, ptr1, len1, natural_width_px, natural_height_px, ptr2, len2);
+            var ptr4 = ret[0];
+            var len4 = ret[1];
+            if (ret[3]) {
+                ptr4 = 0; len4 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred5_0 = ptr4;
+            deferred5_1 = len4;
+            return getStringFromWasm0(ptr4, len4);
+        } finally {
+            wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+        }
+    }
+    /**
      * Batch 모드를 시작한다. 이후 Command 호출 시 paginate()를 건너뛴다.
      * @returns {string}
      */
@@ -1490,6 +1534,19 @@ export class HwpDocument {
         }
     }
     /**
+     * HML 원본의 공통 IR을 HWPML 2.91 XML로 직렬화하여 반환한다.
+     * @returns {Uint8Array}
+     */
+    exportHml() {
+        const ret = wasm.hwpdocument_exportHml(this.__wbg_ptr);
+        if (ret[3]) {
+            throw takeFromExternrefTable0(ret[2]);
+        }
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * 문서를 HWP 바이너리로 내보낸다.
      *
      * Document IR을 HWP 5.0 CFB 바이너리로 직렬화하여 반환한다.
@@ -1816,6 +1873,34 @@ export class HwpDocument {
             return getStringFromWasm0(ptr2, len2);
         } finally {
             wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+        }
+    }
+    /**
+     * @param {number} page_num
+     * @param {string} mode
+     * @param {string} profile
+     * @returns {string}
+     */
+    getCanvasKitReplayPlanWithProfile(page_num, mode, profile) {
+        let deferred4_0;
+        let deferred4_1;
+        try {
+            const ptr0 = passStringToWasm0(mode, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(profile, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ret = wasm.hwpdocument_getCanvasKitReplayPlanWithProfile(this.__wbg_ptr, page_num, ptr0, len0, ptr1, len1);
+            var ptr3 = ret[0];
+            var len3 = ret[1];
+            if (ret[3]) {
+                ptr3 = 0; len3 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred4_0 = ptr3;
+            deferred4_1 = len3;
+            return getStringFromWasm0(ptr3, len3);
+        } finally {
+            wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
         }
     }
     /**
@@ -3104,6 +3189,39 @@ export class HwpDocument {
         }
     }
     /**
+     * HML 열기 메타데이터와 손실 진단을 JSON으로 반환한다.
+     * 다른 입력 포맷에서는 `null`을 반환한다.
+     * @returns {string}
+     */
+    getHmlOpenMetadata() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.hwpdocument_getHmlOpenMetadata(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * HML 저장 가능 여부와 모든 차단 진단을 canonical JSON DTO로 반환한다.
+     * @returns {string}
+     */
+    getHmlSaveState() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.hwpdocument_getHmlSaveState(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * 문단 내 줄 정보를 반환한다 (커서 수직 이동/Home/End용).
      *
      * 반환: JSON `{"lineIndex":N,"lineCount":N,"charStart":N,"charEnd":N}`
@@ -3408,6 +3526,31 @@ export class HwpDocument {
             return getStringFromWasm0(ptr1, len1);
         } finally {
             wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
+     * @param {number} page_num
+     * @param {string} profile
+     * @returns {string}
+     */
+    getPageLayerTreeWithProfile(page_num, profile) {
+        let deferred3_0;
+        let deferred3_1;
+        try {
+            const ptr0 = passStringToWasm0(profile, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.hwpdocument_getPageLayerTreeWithProfile(this.__wbg_ptr, page_num, ptr0, len0);
+            var ptr2 = ret[0];
+            var len2 = ret[1];
+            if (ret[3]) {
+                ptr2 = 0; len2 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred3_0 = ptr2;
+            deferred3_1 = len2;
+            return getStringFromWasm0(ptr2, len2);
+        } finally {
+            wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
         }
     }
     /**
@@ -3886,7 +4029,7 @@ export class HwpDocument {
         return ret !== 0;
     }
     /**
-     * 원본 파일 형식을 반환한다 ("hwp" 또는 "hwpx").
+     * 원본 파일 형식을 반환한다 ("hwp", "hwpx", 또는 "hml").
      * @returns {string}
      */
     getSourceFormat() {
@@ -5221,6 +5364,7 @@ export class HwpDocument {
      *
      * Studio의 page-local 단일 입력처럼 현재 페이지를 먼저 갱신하고 idle 시점에
      * 전체 페이지네이션을 한 번만 수행하는 경로에서 사용한다.
+     * 결과 JSON은 `charOffset`과 상대 cell-flow 변화 신호 `cellFlowChanged`를 포함한다.
      * @param {number} section_idx
      * @param {number} parent_para_idx
      * @param {number} control_idx
@@ -6393,6 +6537,23 @@ export class HwpDocument {
         const ptr0 = passStringToWasm0(layer_kind, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.hwpdocument_renderPageToCanvasFiltered(this.__wbg_ptr, page_num, canvas, scale, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
+        }
+    }
+    /**
+     * @param {number} page_num
+     * @param {HTMLCanvasElement} canvas
+     * @param {number} scale
+     * @param {string} layer_kind
+     * @param {string} profile
+     */
+    renderPageToCanvasFilteredWithProfile(page_num, canvas, scale, layer_kind, profile) {
+        const ptr0 = passStringToWasm0(layer_kind, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(profile, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.hwpdocument_renderPageToCanvasFilteredWithProfile(this.__wbg_ptr, page_num, canvas, scale, ptr0, len0, ptr1, len1);
         if (ret[1]) {
             throw takeFromExternrefTable0(ret[0]);
         }
