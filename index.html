@@ -1,296 +1,609 @@
 <!doctype html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>QuickLook HWP Viewer</title>
-    <style>
-        html,
-        body {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            min-height: 100%;
-            box-sizing: border-box;
-            overflow-x: hidden;
-            background: #f0f0f0;
-        }
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="data:," />
+  <title>QuickLook HWP Viewer</title>
 
-        body {
-            padding-top: 12px;
-            padding-bottom: 12px;
-        }
+  <style>
+    :root {
+      color-scheme: light;
+      background: #f0f0f0;
+    }
 
-        *,
-        *::before,
-        *::after {
-            box-sizing: inherit;
-        }
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      min-height: 100%;
+      box-sizing: border-box;
+      overflow-x: hidden;
+      background: #f0f0f0;
+    }
 
-        .page {
-            display: block;
-            margin: 0 auto 12px auto;
-            width: 100%;
-            overflow: hidden;
-        }
+    *,
+    *::before,
+    *::after {
+      box-sizing: inherit;
+    }
 
-            .page svg {
-                display: block;
-                max-width: 100%;
-                height: auto;
-            }
-    </style>
+    body {
+      padding: 12px 0;
+    }
+
+    #viewer-root {
+      width: 100%;
+    }
+
+    .page {
+      display: block;
+      margin: 0 auto 12px;
+      overflow: hidden;
+      background: white;
+
+      /*
+       * 긴 문서에서 화면 밖 페이지의 layout/paint 비용을 줄인다.
+       * 실제 크기는 JS가 pageInfo에 따라 다시 지정한다.
+       */
+      content-visibility: auto;
+      contain: layout paint style;
+      contain-intrinsic-size: 794px 1123px;
+    }
+
+    .page canvas,
+    .page svg {
+      display: block;
+      max-width: 100%;
+    }
+
+    .page canvas {
+      height: auto;
+    }
+
+    .page-status {
+      display: grid;
+      place-items: center;
+      min-height: 160px;
+      color: #666;
+      font: 13px/1.4 system-ui, sans-serif;
+    }
+
+    .viewer-error {
+      margin: 16px;
+      padding: 16px;
+      color: #a40000;
+      background: #fff;
+      border: 1px solid #d8b4b4;
+      white-space: pre-wrap;
+      font: 13px/1.5 system-ui, sans-serif;
+    }
+  </style>
 </head>
+
 <body>
-    <div id="viewer-root" />
-    <script type="module">
-        import init, { HwpDocument } from "./rhwp.js";
+  <main id="viewer-root"></main>
 
-        const viewerRoot = document.getElementById("viewer-root");
+  <script type="module">
+    import init, { HwpDocument } from "./rhwp.js";
 
-        const measureCanvas = document.createElement("canvas");
-        const measureCtx = measureCanvas.getContext("2d");
+    const CONFIG = Object.freeze({
+      horizontalMargin: 24,
 
-        const textWidthCache = new Map();
-        const MAX_TEXT_WIDTH_CACHE = 30000;
+      /*
+       * 한 canvas가 지나치게 커져 메모리와 GPU upload 비용이 폭증하는 것을 방지한다.
+       * 필요한 경우 화질 우선 환경에서 이 값을 높일 수 있다.
+       */
+      maxCanvasPixels: 67_108_864,
 
-        let renderedPages = [];
+      /*
+       * resize 중에는 CSS 크기만 즉시 바꾸고, bitmap 재렌더링은 잠시 뒤 한 번만 한다.
+       */
+      resizeRenderDelayMs: 120,
 
-        let doc = null;
+      /*
+       * 첫 페이지 다음 페이지 하나를 idle 시간에 미리 렌더링한다.
+       */
+      prefetchPageCount: 1,
 
-        let fitScheduled = false;
+      /*
+       * 최신 rhwp가 아닌 파일을 잘못 배포했을 때도 문서를 볼 수 있도록
+       * renderPageSvg() 폴백을 남긴다.
+       */
+      enableSvgFallback: true,
+    });
 
-        let renderGeneration = 0;
+    const viewerRoot = document.getElementById("viewer-root");
+    const parser = new DOMParser();
 
-        const parser = new DOMParser();
+    let documentHandle = null;
+    let renderedPages = [];
+    let renderGeneration = 0;
+    let fitScheduled = false;
+    let resizeRenderTimer = 0;
+    let loadStartedAt = 0;
 
-        const margin = 24;
+    const measureCanvas = document.createElement("canvas");
+    const measureContext = measureCanvas.getContext("2d");
+    const textWidthCache = new Map();
+    const MAX_TEXT_WIDTH_CACHE = 30_000;
 
-        function postHostMessage(type, extra = {}) {
-            window.chrome?.webview?.postMessage({ type, ...extra });
+    if (!measureContext) {
+      throw new Error("Canvas 2D context를 생성할 수 없습니다.");
+    }
+
+    globalThis.measureTextWidth = (font, text) => {
+      const key = `${font}\n${text}`;
+      const cached = textWidthCache.get(key);
+
+      if (cached !== undefined) {
+        return cached;
+      }
+
+      measureContext.font = font;
+      const width = measureContext.measureText(text).width;
+
+      if (textWidthCache.size < MAX_TEXT_WIDTH_CACHE) {
+        textWidthCache.set(key, width);
+      }
+
+      return width;
+    };
+
+    function postHostMessage(message) {
+      window.chrome?.webview?.postMessage(message);
+    }
+
+    function errorText(error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+
+    function waitIdle(timeout = 80) {
+      return new Promise((resolve) => {
+        if ("requestIdleCallback" in window) {
+          requestIdleCallback(() => resolve(), { timeout });
+        } else {
+          setTimeout(resolve, 0);
+        }
+      });
+    }
+
+    function pageMetrics(page) {
+      const availableWidth = Math.max(
+        1,
+        document.documentElement.clientWidth - CONFIG.horizontalMargin,
+      );
+
+      const displayScale = availableWidth / page.pageWidth;
+      const displayWidth = Math.max(1, Math.floor(page.pageWidth * displayScale));
+      const displayHeight = Math.max(1, Math.floor(page.pageHeight * displayScale));
+
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      let renderScale = displayScale * dpr;
+
+      const nativePixelCount =
+        page.pageWidth *
+        renderScale *
+        page.pageHeight *
+        renderScale;
+
+      if (nativePixelCount > CONFIG.maxCanvasPixels) {
+        renderScale *= Math.sqrt(CONFIG.maxCanvasPixels / nativePixelCount);
+      }
+
+      return {
+        displayScale,
+        displayWidth,
+        displayHeight,
+        renderScale,
+      };
+    }
+
+    function applyPageLayout(page) {
+      const metrics = pageMetrics(page);
+
+      page.wrapper.style.width = `${metrics.displayWidth}px`;
+      page.wrapper.style.minHeight = `${metrics.displayHeight}px`;
+      page.wrapper.style.height = `${metrics.displayHeight}px`;
+
+      if (page.canvas) {
+        page.canvas.style.width = `${metrics.displayWidth}px`;
+        page.canvas.style.height = `${metrics.displayHeight}px`;
+      }
+
+      if (page.svg) {
+        page.svg.setAttribute("width", String(metrics.displayWidth));
+        page.svg.setAttribute("height", String(metrics.displayHeight));
+      }
+
+      page.desiredRenderScale = metrics.renderScale;
+      return metrics;
+    }
+
+    function fitPagesToWidth() {
+      for (const page of renderedPages) {
+        applyPageLayout(page);
+      }
+    }
+
+    function createCanvas(page) {
+      if (page.canvas) {
+        return page.canvas;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.setAttribute("aria-label", `${page.index + 1}페이지`);
+      page.canvas = canvas;
+      page.svg = null;
+      page.wrapper.replaceChildren(canvas);
+      return canvas;
+    }
+
+    function renderSvgFallback(page) {
+      if (
+        !CONFIG.enableSvgFallback ||
+        typeof documentHandle?.renderPageSvg !== "function"
+      ) {
+        throw new Error("Canvas2D 렌더링 실패 후 사용할 SVG 폴백이 없습니다.");
+      }
+
+      const svgText = documentHandle.renderPageSvg(page.index);
+      const parsed = parser.parseFromString(svgText, "image/svg+xml");
+      const parserError = parsed.querySelector("parsererror");
+
+      if (parserError) {
+        throw new Error(`SVG parse 실패: ${parserError.textContent ?? ""}`);
+      }
+
+      const svg = parsed.documentElement;
+      svg.setAttribute("viewBox", `0 0 ${page.pageWidth} ${page.pageHeight}`);
+      svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+      svg.style.background = "white";
+
+      page.canvas = null;
+      page.svg = svg;
+      page.renderer = "svg";
+      page.wrapper.replaceChildren(svg);
+      applyPageLayout(page);
+    }
+
+    async function renderPage(
+      index,
+      {
+        force = false,
+        expectedGeneration = renderGeneration,
+      } = {},
+    ) {
+      if (expectedGeneration !== renderGeneration) {
+        return;
+      }
+
+      const page = renderedPages[index];
+
+      if (!page || !documentHandle) {
+        return;
+      }
+
+      if (page.rendering) {
+        page.rerenderRequested = true;
+        return;
+      }
+
+      const metrics = applyPageLayout(page);
+
+      if (
+        page.rendered &&
+        !force &&
+        page.renderer === "canvas2d" &&
+        Math.abs((page.renderScale ?? 0) - metrics.renderScale) < 0.01
+      ) {
+        return;
+      }
+
+      if (page.rendered && !force) {
+        return;
+      }
+
+      page.rendering = true;
+      page.rerenderRequested = false;
+
+      try {
+        if (typeof documentHandle.renderPageToCanvas !== "function") {
+          throw new Error(
+            "현재 rhwp.js에는 renderPageToCanvas()가 없습니다. rhwp.js와 rhwp_bg.wasm을 같은 최신 버전으로 교체하십시오.",
+          );
         }
 
-        const observer = new IntersectionObserver(
-            (entries) => {
-                for (const entry of entries) {
-                    if (!entry.isIntersecting) {
-                        continue;
-                    }
+        const canvas = createCanvas(page);
 
-                    const index = Number(entry.target.dataset.pageIndex);
-
-                    waitIdle().then(() => {
-                        renderPage(index);
-                    });
-
-                    observer.unobserve(entry.target);
-                }
-            },
-            {
-                root: null,
-                rootMargin: "1200px 0px",
-                threshold: 0.01,
-            },
+        /*
+         * rhwp가 canvas.width/height를 페이지 크기 × scale로 직접 설정한다.
+         * CSS 표시 크기는 applyPageLayout()에서 별도로 유지한다.
+         */
+        documentHandle.renderPageToCanvas(
+          page.index,
+          canvas,
+          metrics.renderScale,
         );
 
-        function renderPage(index) {
-            const page = renderedPages[index];
-
-            try {
-                if (!page || page.rendered || page.rendering) {
-                    return;
-                }
-
-                page.rendering = true;
-
-                const svgText = doc.renderPageSvg(index);
-                const svg = parser.parseFromString(
-                    svgText,
-                    "image/svg+xml",
-                ).documentElement;
-
-                svg.setAttribute(
-                    "viewBox",
-                    `0 0 ${page.pageWidth} ${page.pageHeight}`,
-                );
-                svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-                svg.style.display = "block";
-                svg.style.background = "white";
-
-                page.wrapper.replaceChildren(svg);
-                page.svg = svg;
-                page.rendered = true;
-
-                fitOnePage(page);
-            } catch (error) {
-                const errorMsg = `page ${index + 1} render failed`;
-                console.error(errorMsg, error);
-                page.wrapper.textContent = errorMsg;
-                postHostMessage("render-failed", {
-                    pageIndex: index,
-                    message: error?.message ?? String(error),
-                })
-            } finally {
-                page.rendering = false;
-            }
+        if (expectedGeneration !== renderGeneration) {
+          return;
         }
 
-        function fitOnePage(page) {
-            const availableWidth = Math.max(
-                1,
-                document.documentElement.clientWidth - margin,
-            );
-            const scale = availableWidth / page.pageWidth;
+        canvas.style.width = `${metrics.displayWidth}px`;
+        canvas.style.height = `${metrics.displayHeight}px`;
 
-            const fittedWidth = Math.floor(page.pageWidth * scale);
-            const fittedHeight = Math.floor(page.pageHeight * scale);
+        page.renderer = "canvas2d";
+        page.renderScale = metrics.renderScale;
+        page.rendered = true;
+        page.lastError = null;
+      } catch (canvasError) {
+        console.error(
+          `Canvas2D page ${index + 1} render failed`,
+          canvasError,
+        );
 
-            page.wrapper.style.width = fittedWidth + "px";
-            page.wrapper.style.minHeight = fittedHeight + "px";
+        try {
+          renderSvgFallback(page);
+          page.rendered = true;
+          page.lastError = errorText(canvasError);
 
-            if (page.svg) {
-                page.svg.setAttribute("width", fittedWidth);
-                page.svg.setAttribute("height", fittedHeight);
+          postHostMessage({
+            type: "render-fallback",
+            pageIndex: index,
+            reason: page.lastError,
+          });
+        } catch (fallbackError) {
+          const message =
+            `Page ${index + 1} render failed\n` +
+            `Canvas2D: ${errorText(canvasError)}\n` +
+            `SVG fallback: ${errorText(fallbackError)}`;
+
+          page.rendered = false;
+          page.lastError = message;
+          page.wrapper.innerHTML = "";
+          const status = document.createElement("div");
+          status.className = "page-status";
+          status.textContent = message;
+          page.wrapper.appendChild(status);
+
+          console.error(message, fallbackError);
+          postHostMessage({
+            type: "render-failed",
+            pageIndex: index,
+            error: message,
+          });
+        }
+      } finally {
+        page.rendering = false;
+
+        if (
+          page.rerenderRequested &&
+          expectedGeneration === renderGeneration
+        ) {
+          page.rerenderRequested = false;
+          queueMicrotask(() => {
+            void renderPage(index, {
+              force: true,
+              expectedGeneration,
+            });
+          });
+        }
+      }
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const expectedGeneration = renderGeneration;
+
+        for (const entry of entries) {
+          if (!entry.isIntersecting) {
+            continue;
+          }
+
+          observer.unobserve(entry.target);
+
+          const index = Number(entry.target.dataset.pageIndex);
+
+          void waitIdle().then(() => {
+            if (expectedGeneration !== renderGeneration) {
+              return;
             }
+
+            return renderPage(index, { expectedGeneration });
+          });
+        }
+      },
+      {
+        root: null,
+        rootMargin: "1200px 0px",
+        threshold: 0.01,
+      },
+    );
+
+    function rerenderRenderedCanvasPages() {
+      const expectedGeneration = renderGeneration;
+
+      for (const page of renderedPages) {
+        if (!page.rendered || page.renderer !== "canvas2d") {
+          continue;
         }
 
-        function fitPagesToWidth() {
-            for (const page of renderedPages) {
-                fitOnePage(page);
-            }
+        const desiredScale = pageMetrics(page).renderScale;
+        const previousScale = page.renderScale ?? 0;
+
+        if (Math.abs(desiredScale - previousScale) < 0.01) {
+          continue;
         }
 
-        globalThis.measureTextWidth = (font, text) => {
-            const key = font + "\n" + text;
+        void renderPage(page.index, {
+          force: true,
+          expectedGeneration,
+        });
+      }
+    }
 
-            const cached = textWidthCache.get(key);
+    function scheduleFitPages() {
+      if (!fitScheduled) {
+        fitScheduled = true;
 
-            if (cached !== undefined) {
-                return cached;
-            }
+        requestAnimationFrame(() => {
+          fitScheduled = false;
+          fitPagesToWidth();
+        });
+      }
 
-            measureCtx.font = font;
-            const width = measureCtx.measureText(text).width;
+      clearTimeout(resizeRenderTimer);
+      resizeRenderTimer = window.setTimeout(() => {
+        rerenderRenderedCanvasPages();
+      }, CONFIG.resizeRenderDelayMs);
+    }
 
-            if (textWidthCache.size < MAX_TEXT_WIDTH_CACHE) {
-                textWidthCache.set(key, width);
-            }
+    window.chrome?.webview?.addEventListener("message", (event) => {
+      if (event.data?.type === "host-resize") {
+        scheduleFitPages();
+      }
+    });
 
-            return width;
+    window.addEventListener("resize", scheduleFitPages);
+
+    function releaseCurrentDocument() {
+      observer.disconnect();
+      clearTimeout(resizeRenderTimer);
+
+      if (documentHandle) {
+        try {
+          documentHandle.free();
+        } catch (error) {
+          console.warn("HwpDocument.free() failed", error);
+        }
+
+        documentHandle = null;
+      }
+    }
+
+    async function loadHwpBytes(bytes) {
+      const expectedGeneration = ++renderGeneration;
+
+      releaseCurrentDocument();
+      viewerRoot.replaceChildren();
+      renderedPages = [];
+      textWidthCache.clear();
+
+      documentHandle = new HwpDocument(bytes);
+      const pageCount = documentHandle.pageCount();
+
+      for (let index = 0; index < pageCount; index++) {
+        const pageInfo = JSON.parse(documentHandle.getPageInfo(index));
+        const wrapper = document.createElement("section");
+        const status = document.createElement("div");
+
+        wrapper.className = "page";
+        wrapper.dataset.pageIndex = String(index);
+        wrapper.setAttribute("aria-label", `${index + 1}페이지`);
+
+        status.className = "page-status";
+        status.textContent = `Loading page ${index + 1}...`;
+        wrapper.appendChild(status);
+
+        const page = {
+          index,
+          pageWidth: Number(pageInfo.width),
+          pageHeight: Number(pageInfo.height),
+          wrapper,
+          canvas: null,
+          svg: null,
+          renderer: null,
+          rendered: false,
+          rendering: false,
+          rerenderRequested: false,
+          renderScale: 0,
+          desiredRenderScale: 0,
+          lastError: null,
         };
 
-        function waitIdle() {
-            return new Promise((resolve) => {
-                if ("requestIdleCallback" in window) {
-                    requestIdleCallback(() => resolve(), { timeout: 50 });
-                } else {
-                    setTimeout(resolve, 0);
-                }
-            });
+        viewerRoot.appendChild(wrapper);
+        renderedPages.push(page);
+
+        if (index !== 0) {
+          observer.observe(wrapper);
+        }
+      }
+
+      fitPagesToWidth();
+
+      if (pageCount > 0) {
+        await renderPage(0, { expectedGeneration });
+      }
+
+      for (
+        let offset = 1;
+        offset <= CONFIG.prefetchPageCount && offset < pageCount;
+        offset++
+      ) {
+        void waitIdle(120).then(() => {
+          if (expectedGeneration !== renderGeneration) {
+            return;
+          }
+
+          observer.unobserve(renderedPages[offset].wrapper);
+          return renderPage(offset, { expectedGeneration });
+        });
+      }
+
+      postHostMessage({
+        type: "load-complete",
+        pageCount,
+        renderer: "canvas2d",
+        elapsedMs: Math.round(performance.now() - loadStartedAt),
+      });
+    }
+
+    await init({ module_or_path: "/rhwp_bg.wasm" });
+
+    window.loadHwpFromUrl = async function loadHwpFromUrl(url) {
+      loadStartedAt = performance.now();
+
+      try {
+        const response = await fetch(url, { cache: "no-store" });
+
+        if (!response.ok) {
+          throw new Error(
+            `HWP fetch failed: ${response.status} ${response.statusText}`,
+          );
         }
 
-        function scheduleFitPages() {
-            if (fitScheduled) {
-                return;
-            }
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        await loadHwpBytes(bytes);
+      } catch (error) {
+        const message = errorText(error);
+        console.error("HWP load failed", error);
 
-            fitScheduled = true;
+        releaseCurrentDocument();
+        viewerRoot.innerHTML = "";
 
-            requestAnimationFrame(() => {
-                fitScheduled = false;
-                fitPagesToWidth();
-            });
-        }
+        const errorBox = document.createElement("div");
+        errorBox.className = "viewer-error";
+        errorBox.textContent = `문서 로드 실패\n${message}`;
+        viewerRoot.appendChild(errorBox);
 
-        window.chrome?.webview?.addEventListener("message", (e) => {
-            if (e.data?.type === "host-resize") {
-                scheduleFitPages();
-            }
+        postHostMessage({
+          type: "load-failed",
+          error: message,
         });
 
-        window.addEventListener("resize", scheduleFitPages);
+        throw error;
+      }
+    };
 
-        await init({ module_or_path: "/rhwp_bg.wasm" });
+    window.addEventListener("beforeunload", releaseCurrentDocument);
 
-        window.loadHwpFromUrl = async function (url) {
-            try {
-                const response = await fetch(url, { cache: "no-store" });
-
-                if (!response.ok) {
-                    throw new Error(
-                        `HWP fetch failed: ${response.status} ${response.statusText}`,
-                    );
-                }
-
-                const buffer = await response.arrayBuffer();
-                const bytes = new Uint8Array(buffer);
-
-                await loadHwpBytes(bytes);
-
-                postHostMessage("load-complete");
-            } catch (e) {
-                console.error("loadHwpFromUrl failed", e);
-                postHostMessage("load-failed", {
-                    message: e?.message ?? String(e)
-                });
-                throw e;
-            }
-        };
-
-        postHostMessage("viewer-ready");
-
-        async function loadHwpBytes(bytes) {
-            renderGeneration += 1;
-            const generation = renderGeneration;
-
-            observer.disconnect();
-            viewerRoot.replaceChildren();
-            renderedPages = [];
-
-            doc = new HwpDocument(bytes);
-
-            const pageCount = doc.pageCount();
-
-            for (let i = 0; i < pageCount; i++) {
-                const pageInfo = JSON.parse(doc.getPageInfo(i));
-
-                const page = {
-                    index: i,
-                    pageWidth: pageInfo.width,
-                    pageHeight: pageInfo.height,
-                    wrapper: document.createElement("div"),
-                    svg: null,
-                    rendered: false,
-                    rendering: false,
-                };
-
-                page.wrapper.className = "page";
-                page.wrapper.textContent = `Loading page ${i + 1}...`;
-                page.wrapper.dataset.pageIndex = String(i);
-
-                document.body.appendChild(page.wrapper);
-                renderedPages.push(page);
-
-                if (i !== 0) {
-                    observer.observe(page.wrapper);
-                }
-            }
-
-            fitPagesToWidth();
-
-            if (pageCount > 0) {
-                renderPage(0);
-            }
-
-            if (pageCount > 1) {
-                waitIdle().then(() => {
-                    if (generation !== renderGeneration) {
-                        return;
-                    }
-                    renderPage(1, generation);
-                });
-            }
-        }
-    </script>
+    window.hwpViewerReady = true;
+    postHostMessage({
+      type: "viewer-ready",
+      renderer: "canvas2d",
+    });
+  </script>
 </body>
 </html>
